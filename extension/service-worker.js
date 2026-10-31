@@ -31,5 +31,20 @@ const respondWith = (external) => (msg, _sender, sendResponse) => {
 	return true;
 };
 
+const keepPopupWarm = async () => {
+	if (await chrome.offscreen.hasDocument()) return;
+	await chrome.offscreen
+		.createDocument({
+			url: "warm.html",
+			reasons: ["LOCAL_STORAGE"],
+			justification: "Keeps the extension process alive so the popup opens without starting a renderer",
+		})
+		.catch(() => undefined);
+};
+
+chrome.runtime.onStartup.addListener(keepPopupWarm);
+chrome.runtime.onInstalled.addListener(keepPopupWarm);
+keepPopupWarm();
+
 chrome.runtime.onMessage.addListener(respondWith(false));
 chrome.runtime.onMessageExternal.addListener(respondWith(true));

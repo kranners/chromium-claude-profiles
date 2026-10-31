@@ -1,3 +1,8 @@
+import { listAccounts } from "./lib/jars.js";
+import { sendNative } from "./lib/native.js";
+
+const PROFILES_CACHE_KEY = "profilesCache";
+
 const byId = (id) => document.getElementById(id);
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -52,24 +57,36 @@ const accountRow = (account) =>
 
 const emptyRow = (text) => element("li", { className: "empty", textContent: text });
 
-const renderProfiles = async () => {
-	const result = await send({ type: "profiles.list" });
-	const list = byId("profiles");
+const showProfiles = ({ profiles, current }) =>
+	byId("profiles").replaceChildren(
+		...(profiles.length
+			? profiles.map((profile) => profileRow(profile, current))
+			: [emptyRow("No profiles. Run: ccp add <name>")]),
+	);
+
+const showCachedProfiles = async () => {
+	const cached = (await chrome.storage.local.get(PROFILES_CACHE_KEY))[PROFILES_CACHE_KEY];
+	if (cached) showProfiles(cached);
+};
+
+const refreshProfiles = async () => {
+	const startedAt = performance.now();
+	const result = await sendNative({ type: "profiles.list" });
+	const elapsed = Math.round(performance.now() - startedAt);
 	if (!result.ok) {
 		showMessage("profiles-error", result.error.message);
-		list.replaceChildren();
+		showMessage("status", null);
 		return;
 	}
 	showMessage("profiles-error", null);
-	list.replaceChildren(
-		...(result.profiles.length
-			? result.profiles.map((profile) => profileRow(profile, result.current))
-			: [emptyRow("No profiles. Run: ccp add <name>")]),
-	);
+	showMessage("status", `Launcher answered in ${elapsed} ms`);
+	const fresh = { profiles: result.profiles, current: result.current };
+	showProfiles(fresh);
+	await chrome.storage.local.set({ [PROFILES_CACHE_KEY]: fresh });
 };
 
 const renderAccounts = async () => {
-	const result = await send({ type: "accounts.list" });
+	const result = await listAccounts();
 	const list = byId("accounts");
 	if (!result.ok) {
 		showMessage("accounts-error", result.error.message);
@@ -82,9 +99,9 @@ const renderAccounts = async () => {
 };
 
 const launchProfile = async (name) => {
-	const result = await send({ type: "profiles.launch", name });
+	const result = await sendNative({ type: "profiles.launch", name });
 	showMessage("profiles-error", result.ok ? null : result.error.message);
-	await renderProfiles();
+	await refreshProfiles();
 };
 
 const switchAccount = async (label) => {
@@ -109,10 +126,12 @@ byId("save-form").addEventListener("submit", async (event) => {
 	await renderAccounts();
 });
 
+byId("reload").addEventListener("click", () => chrome.runtime.reload());
+
 byId("sign-in-another").addEventListener("click", async () => {
 	const result = await send({ type: "accounts.signIn" });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
 });
 
-renderProfiles();
 renderAccounts();
+showCachedProfiles().then(refreshProfiles);

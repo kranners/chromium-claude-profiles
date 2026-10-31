@@ -128,3 +128,19 @@ button {
 button:disabled {
 	cursor: default;
 }
+
+.status {
+	margin: 8px 0 0;
+	color: var(--muted);
+	font-size: 11px;
+}
+
+.link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-decoration: underline;
+	cursor: pointer;
+}

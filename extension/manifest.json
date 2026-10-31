@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Claude Profiles",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Launch Chromium profiles per Claude account and switch claude.ai tab accounts.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApsOB8/9r26rcuLGR+VHgUV6ZnwJueFmlMycFrCJkxny7BwsnxFty2Niy/hvaPzESDb/o+8KjsbxOlQlblje8HZnm6eTm60PDGqJ0xHjRjNF5L/M8OG5dh7rWz/MAp3BUpq5Nfa6YL4ukOxieWPOeVksWRHUiNa8P7eMQAC0sGyIBEq2GMVM4GCL2bpCOUoUN6NsCV10Ax8wvM7KFJX2NNuXBqUx2Fd0EqyyTrTFbRjsB4RRJcWayumYTuWxqfaNNqVi0s8YC/nPZphux2mIOUU22exiPrye/m/vzNGgA4RwId2/Qr1n7vzkVIKNzscn5jS+V9WHBmjtZCKUefwmb/QIDAQAB",
-  "permissions": ["nativeMessaging", "cookies", "storage"],
+  "permissions": ["nativeMessaging", "cookies", "storage", "offscreen"],
   "host_permissions": ["https://claude.ai/*", "https://*.claude.ai/*"],
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Claude Profiles" },

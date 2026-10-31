@@ -170,6 +170,11 @@ const main = async () => {
 	assert.equal(ourWorker.url, `chrome-extension://${OUR_EXTENSION_ID}/service-worker.js`);
 	step("service worker targets present");
 
+	await pollFor("the warm offscreen document", 15_000, async () =>
+		(await listTargets(port)).some((target) => target.url === `chrome-extension://${OUR_EXTENSION_ID}/warm.html`) ? true : null,
+	);
+	step("warm offscreen document keeps the extension process alive");
+
 	await pollFor("our service worker to finish loading", 15_000, async () =>
 		(await evaluateInWorker(port, `typeof globalThis.dispatch === "function"`)) === true ? true : null,
 	);
