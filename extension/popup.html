@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Claude Profiles</title>
+		<link rel="stylesheet" href="popup.css" />
+		<script type="module" src="popup.js"></script>
+	</head>
+	<body>
+		<section>
+			<h1>Profiles</h1>
+			<p id="profiles-error" class="error" hidden></p>
+			<ul id="profiles" class="rows"></ul>
+		</section>
+		<section>
+			<h1>claude.ai tab account</h1>
+			<p class="helper">Changes the claude.ai login in this profile's tabs. Claude in Chrome keeps its own login.</p>
+			<form id="save-form" class="save">
+				<input id="label" name="label" type="text" placeholder="Label" maxlength="64" required />
+				<button type="submit">Save current</button>
+			</form>
+			<p id="accounts-error" class="error" hidden></p>
+			<p id="accounts-notice" class="notice" hidden></p>
+			<ul id="accounts" class="rows"></ul>
+		</section>
+	</body>
+</html>

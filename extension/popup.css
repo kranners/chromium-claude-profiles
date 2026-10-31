@@ -1,0 +1,136 @@
+:root {
+	color-scheme: light dark;
+	--fg: #1f1f1f;
+	--muted: #6b6b6b;
+	--bg: #ffffff;
+	--border: #e2e2e2;
+	--error: #b3261e;
+	--notice: #8a5a00;
+	--running: #1e8e3e;
+	--stopped: #b0b0b0;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--fg: #e8e8e8;
+		--muted: #a0a0a0;
+		--bg: #202124;
+		--border: #3c3c3c;
+		--error: #f28b82;
+		--notice: #fdd663;
+		--running: #81c995;
+		--stopped: #5f6368;
+	}
+}
+
+body {
+	width: 320px;
+	margin: 0;
+	padding: 12px;
+	box-sizing: border-box;
+	font: 13px/1.4 system-ui, sans-serif;
+	color: var(--fg);
+	background: var(--bg);
+}
+
+section + section {
+	margin-top: 16px;
+	padding-top: 12px;
+	border-top: 1px solid var(--border);
+}
+
+h1 {
+	margin: 0 0 8px;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 0;
+}
+
+.row + .row {
+	border-top: 1px solid var(--border);
+}
+
+.dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--stopped);
+}
+
+.dot.running {
+	background: var(--running);
+}
+
+.identity {
+	flex: 1;
+	min-width: 0;
+}
+
+.name,
+.email {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.email,
+.meta,
+.helper,
+.empty {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.this-window {
+	margin-left: 4px;
+	color: var(--muted);
+	font-size: 11px;
+}
+
+.helper {
+	margin: 0 0 8px;
+}
+
+.save {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.save input {
+	flex: 1;
+	min-width: 0;
+}
+
+.error {
+	color: var(--error);
+	margin: 0 0 8px;
+}
+
+.notice {
+	color: var(--notice);
+	margin: 0 0 8px;
+}
+
+button {
+	flex: none;
+	cursor: pointer;
+}
+
+button:disabled {
+	cursor: default;
+}

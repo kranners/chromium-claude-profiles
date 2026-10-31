@@ -1,0 +1,94 @@
+import { isSafeUrl, launchProfile, prepareProfileHosts } from "./chromium.ts";
+import { VERSION } from "./paths.ts";
+import { addProfile, ensureHome, fail, findProfile, isValidName, readProfiles, removeProfile, viewOf } from "./store.ts";
+
+export type Profile = { name: string; email: string | null; configDir: string | null; createdAt: string };
+export type ProfileView = Profile & { userDataDir: string; running: boolean; pid: number | null };
+export type ErrorCode =
+	| "invalid_request"
+	| "not_found"
+	| "already_exists"
+	| "running"
+	| "unauthorized"
+	| "chromium_not_found"
+	| "unsupported"
+	| "native_host_unavailable"
+	| "internal";
+export type Failure = { ok: false; error: { code: ErrorCode; message: string } };
+export type Result<T extends object> = ({ ok: true } & T) | Failure;
+
+export type Context = { home: string; env: NodeJS.ProcessEnv; current: string | null };
+
+export const NATIVE_HOST_TYPES: readonly string[] = ["ping", "profiles.list", "profiles.status", "profiles.launch"];
+
+type Request = { type: string; [param: string]: unknown };
+
+const isRequest = (value: unknown): value is Request =>
+	typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as Request).type === "string";
+
+const withProfile = <T extends object>(
+	ctx: Context,
+	name: unknown,
+	use: (profile: Profile) => Result<T> | Promise<Result<T>>,
+): Result<T> | Promise<Result<T>> => {
+	if (!isValidName(name)) return fail("invalid_request", "Invalid profile name");
+	const profile = findProfile(ctx.home, name);
+	return profile ? use(profile) : fail("not_found", `No profile named ${name}`);
+};
+
+const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<object>> => {
+	switch (req.type) {
+		case "ping":
+			return { ok: true, version: VERSION };
+		case "profiles.list":
+			return {
+				ok: true,
+				profiles: readProfiles(ctx.home).map((profile) => viewOf(ctx.home, profile)),
+				current: ctx.current,
+			};
+		case "profiles.status":
+			return withProfile(ctx, req.name, (profile) => ({ ok: true, profile: viewOf(ctx.home, profile) }));
+		case "profiles.add": {
+			ensureHome(ctx.home);
+			const added = addProfile(ctx.home, { name: req.name, email: req.email, configDir: req.configDir });
+			if (!added.ok) return added;
+			prepareProfileHosts(ctx.home, added.profile.name, ctx.env);
+			return { ok: true, profile: viewOf(ctx.home, added.profile) };
+		}
+		case "profiles.remove":
+			if (req.keepData !== undefined && typeof req.keepData !== "boolean") {
+				return fail("invalid_request", "keepData must be a boolean");
+			}
+			return removeProfile(ctx.home, req.name, req.keepData === true);
+		case "profiles.launch":
+			if (req.url !== undefined && !isSafeUrl(req.url)) {
+				return fail("invalid_request", "url must be an http or https URL");
+			}
+			return withProfile(ctx, req.name, (profile) => launchProfile(ctx.home, profile, (req.url as string) ?? null, ctx.env));
+		case "profiles.env":
+			return withProfile(ctx, req.name, (profile) =>
+				profile.configDir === null
+					? fail("invalid_request", `Profile ${profile.name} has no configDir`)
+					: { ok: true, env: { CLAUDE_CONFIG_DIR: profile.configDir }, unset: ["CLAUDE_CODE_OAUTH_TOKEN"] },
+			);
+		default:
+			return fail("unsupported", `Unsupported request type: ${req.type}`);
+	}
+};
+
+export const handle = async (req: unknown, ctx: Context): Promise<Result<object>> => {
+	if (!isRequest(req)) return fail("invalid_request", "Request must be an object with a string type");
+	try {
+		return await dispatch(req, ctx);
+	} catch (error) {
+		process.stderr.write(`ccp: ${req.type} failed: ${(error as Error).message}\n`);
+		return fail("internal", (error as Error).message);
+	}
+};
+
+export const handleNative = (req: unknown, ctx: Context): Promise<Result<object>> => {
+	if (isRequest(req) && !NATIVE_HOST_TYPES.includes(req.type)) {
+		return Promise.resolve(fail("unsupported", `${req.type} is not available over the native host`));
+	}
+	return handle(req, ctx);
+};
