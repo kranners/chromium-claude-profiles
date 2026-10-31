@@ -5,7 +5,7 @@ export const LABEL_PATTERN = /^[A-Za-z0-9 ._@-]{1,64}$/;
 
 export const NATIVE_TYPES = new Set(["ping", "profiles.list", "profiles.launch"]);
 export const EXTERNAL_TYPES = new Set([...NATIVE_TYPES, "accounts.list", "accounts.switch"]);
-export const POPUP_TYPES = new Set([...EXTERNAL_TYPES, "accounts.save", "accounts.forget"]);
+export const POPUP_TYPES = new Set([...EXTERNAL_TYPES, "accounts.save", "accounts.forget", "accounts.signIn"]);
 
 export const failure = (code, message) => ({ ok: false, error: { code, message } });
 

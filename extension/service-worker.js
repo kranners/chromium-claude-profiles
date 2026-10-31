@@ -1,12 +1,13 @@
 import { EXTERNAL_TYPES, NATIVE_TYPES, POPUP_TYPES, failure, isRequest } from "./lib/protocol.js";
 import { sendNative } from "./lib/native.js";
-import { forgetAccount, listAccounts, saveAccount, switchAccount } from "./lib/jars.js";
+import { forgetAccount, listAccounts, saveAccount, signInAnother, switchAccount } from "./lib/jars.js";
 
 const accountHandlers = {
 	"accounts.list": () => listAccounts(),
 	"accounts.save": (msg) => saveAccount(msg.label),
 	"accounts.switch": (msg) => switchAccount(msg.label),
 	"accounts.forget": (msg) => forgetAccount(msg.label),
+	"accounts.signIn": () => signInAnother(),
 };
 
 const unsupported = (type) => failure("unsupported", `Unsupported request type: ${type}`);

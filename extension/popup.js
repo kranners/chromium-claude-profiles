@@ -1,13 +1,6 @@
-import { hasSessionCookie } from "./lib/jars.js";
-
-const SESSION_SETTLE_MS = 3000;
-const SIGNED_OUT_NOTICE = "Signed out? Re-save this account.";
-
 const byId = (id) => document.getElementById(id);
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
-
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const element = (tag, props = {}, children = []) => {
 	const node = Object.assign(document.createElement(tag), props);
@@ -95,13 +88,9 @@ const launchProfile = async (name) => {
 };
 
 const switchAccount = async (label) => {
-	showMessage("accounts-notice", null);
 	const result = await send({ type: "accounts.switch", label });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
 	await renderAccounts();
-	if (!result.ok) return;
-	if (result.reloadedTabs > 0) await delay(SESSION_SETTLE_MS);
-	if (!(await hasSessionCookie())) showMessage("accounts-notice", SIGNED_OUT_NOTICE);
 };
 
 const forgetAccount = async (label) => {
@@ -116,9 +105,13 @@ byId("save-form").addEventListener("submit", async (event) => {
 	const label = String(new FormData(form).get("label") ?? "").trim();
 	const result = await send({ type: "accounts.save", label });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
-	showMessage("accounts-notice", null);
 	if (result.ok) form.reset();
 	await renderAccounts();
+});
+
+byId("sign-in-another").addEventListener("click", async () => {
+	const result = await send({ type: "accounts.signIn" });
+	showMessage("accounts-error", result.ok ? null : result.error.message);
 });
 
 renderProfiles();

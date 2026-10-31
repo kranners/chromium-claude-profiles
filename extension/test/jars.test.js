@@ -89,6 +89,8 @@ test("external callers cannot save or forget accounts", () => {
 	assert.equal(EXTERNAL_TYPES.has("accounts.save"), false);
 	assert.equal(EXTERNAL_TYPES.has("accounts.forget"), false);
 	assert.equal(POPUP_TYPES.has("accounts.save"), true);
+	assert.equal(EXTERNAL_TYPES.has("accounts.signIn"), false);
+	assert.equal(POPUP_TYPES.has("accounts.signIn"), true);
 	assert.deepEqual(
 		[...EXTERNAL_TYPES].sort(),
 		["accounts.list", "accounts.switch", "ping", "profiles.launch", "profiles.list"],

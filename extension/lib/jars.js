@@ -3,6 +3,7 @@ import { failure, isLabel } from "./protocol.js";
 const STORAGE_KEY = "jars";
 const COOKIE_DOMAIN = "claude.ai";
 const SESSION_COOKIE = "sessionKey";
+const ACCOUNT_URL = "https://claude.ai/api/account";
 const CLAUDE_TAB_PATTERNS = ["https://claude.ai/*", "https://*.claude.ai/*"];
 const INFRA_COOKIES = new Set(["__cf_bm", "cf_clearance", "_cfuvid", "__cflb"]);
 
@@ -58,8 +59,11 @@ const unknownLabel = (label) => failure("not_found", `No saved account "${label}
 
 const savedJar = (jars, label) => (Object.hasOwn(jars, label) ? jars[label] : undefined);
 
-export const hasSessionCookie = async () =>
-	(await chrome.cookies.getAll({ domain: COOKIE_DOMAIN, name: SESSION_COOKIE })).length > 0;
+const signedInEmail = async () => {
+	const response = await fetch(ACCOUNT_URL, { credentials: "include", cache: "no-store" });
+	if (!response.ok) return null;
+	return (await response.json()).email_address ?? null;
+};
 
 export const listAccounts = async () => ({ ok: true, accounts: summarizeJars(await readJars()) });
 
@@ -69,24 +73,44 @@ export const saveAccount = async (label) => {
 	if (!cookies.some((c) => c.name === SESSION_COOKIE)) {
 		return failure("invalid_request", "Not signed in to claude.ai");
 	}
+	if (!(await signedInEmail())) return failure("session_expired", "This claude.ai session is signed out. Sign in again first.");
 	const jar = { savedAt: new Date().toISOString(), cookies: cookies.map(toSavedCookie) };
 	await writeJars({ ...(await readJars()), [label]: jar });
 	return { ok: true, account: toAccountSummary(label, jar) };
+};
+
+const clearAccountCookies = async () => {
+	for (const c of await accountCookies()) {
+		await chrome.cookies.remove({ url: cookieUrl(c), name: c.name, storeId: c.storeId });
+	}
+};
+
+export const signInAnother = async () => {
+	await clearAccountCookies();
+	await chrome.tabs.create({ url: "https://claude.ai/login" });
+	return { ok: true };
+};
+
+const replaceAccountCookies = async (cookies) => {
+	await clearAccountCookies();
+	for (const saved of cookies) {
+		await chrome.cookies.set(toSetDetails(saved));
+	}
 };
 
 export const switchAccount = async (label) => {
 	if (!isLabel(label)) return invalidLabel();
 	const jar = savedJar(await readJars(), label);
 	if (!Array.isArray(jar?.cookies)) return unknownLabel(label);
-	for (const c of await accountCookies()) {
-		await chrome.cookies.remove({ url: cookieUrl(c), name: c.name, storeId: c.storeId });
-	}
-	for (const saved of jar.cookies) {
-		await chrome.cookies.set(toSetDetails(saved));
+	const previous = (await accountCookies()).map(toSavedCookie);
+	const email = await replaceAccountCookies(jar.cookies).then(signedInEmail, () => null);
+	if (!email) {
+		await replaceAccountCookies(previous);
+		return failure("session_expired", `The saved session for "${label}" is no longer valid. Sign in to it again and re-save it.`);
 	}
 	const tabs = await chrome.tabs.query({ url: CLAUDE_TAB_PATTERNS });
 	await Promise.all(tabs.map((tab) => chrome.tabs.reload(tab.id)));
-	return { ok: true, reloadedTabs: tabs.length };
+	return { ok: true, email, reloadedTabs: tabs.length };
 };
 
 export const forgetAccount = async (label) => {

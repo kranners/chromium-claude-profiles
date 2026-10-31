@@ -5,7 +5,6 @@
 	--bg: #ffffff;
 	--border: #e2e2e2;
 	--error: #b3261e;
-	--notice: #8a5a00;
 	--running: #1e8e3e;
 	--stopped: #b0b0b0;
 }
@@ -17,7 +16,6 @@
 		--bg: #202124;
 		--border: #3c3c3c;
 		--error: #f28b82;
-		--notice: #fdd663;
 		--running: #81c995;
 		--stopped: #5f6368;
 	}
@@ -121,10 +119,6 @@ h1 {
 	margin: 0 0 8px;
 }
 
-.notice {
-	color: var(--notice);
-	margin: 0 0 8px;
-}
 
 button {
 	flex: none;
