@@ -34,9 +34,13 @@ Each profile is its own Chromium `--user-data-dir` under `~/.config/chromium-cla
 Switching only changes the claude.ai login in this profile's tabs. Claude in Chrome keeps its own
 login, so run one `ccp` profile per account for parallel Claude in Chrome instances.
 
-After pulling a new version, press reload on the extension in `chrome://extensions`. Chromium keeps
+After pulling a new version, press "Reload extension" in the popup, in every profile. Chromium keeps
 serving the old service worker to an extension loaded with `--load-extension` across restarts and
-version bumps, so `ccp launch` profiles need the same reload.
+version bumps. The popup itself always loads fresh from disk.
+
+The popup opens instantly because an offscreen document keeps the extension's process alive; without
+it a busy machine spends about a second starting a renderer for every open. "Launcher answered in N ms"
+under the profile list confirms the native host is working.
 
 ### Pairing Claude Code with a profile
 
