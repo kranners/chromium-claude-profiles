@@ -191,6 +191,15 @@ const main = async () => {
 	assert.deepEqual(accounts, { ok: true, accounts: [] });
 	step("dispatcher accounts.list is empty");
 
+	await evaluateInWorker(port, "setTimeout(() => chrome.runtime.reload(), 100), true");
+	await delay(1500);
+	const afterReload = await pollFor("the extension to come back after a reload", 15_000, async () => {
+		const result = await evaluateInWorker(port, `dispatch({type: "accounts.list"}, {external: false})`).catch(() => null);
+		return result?.ok ? result : null;
+	});
+	assert.deepEqual(afterReload, { ok: true, accounts: [] });
+	step("extension reloads without being disabled");
+
 	const pid = lockPid(userDataDir);
 	assert.ok(pid !== null, "SingletonLock has no pid");
 	process.kill(pid, "SIGTERM");
