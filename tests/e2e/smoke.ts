@@ -99,7 +99,7 @@ const evaluate = (webSocketUrl: string, expression: string): Promise<any> =>
 		const timer = setTimeout(() => {
 			socket.close();
 			failWith(new Error(`Runtime.evaluate timed out: ${expression}`));
-		}, 15_000);
+		}, 5_000);
 		socket.addEventListener("error", () => {
 			clearTimeout(timer);
 			failWith(new Error(`DevTools socket failed for ${webSocketUrl}`));
@@ -121,6 +121,23 @@ const evaluate = (webSocketUrl: string, expression: string): Promise<any> =>
 			done(message.result.result.value);
 		});
 	});
+
+const evaluateInWorker = async (port: number, expression: string): Promise<any> => {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const worker = workerTarget(await listTargets(port), OUR_EXTENSION_ID);
+		if (!worker) {
+			await delay(500);
+			continue;
+		}
+		try {
+			return await evaluate(worker.webSocketDebuggerUrl, expression);
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError ?? new Error(`our service worker is gone: ${expression}`);
+};
 
 const step = (text: string) => process.stdout.write(`ok - ${text}\n`);
 
@@ -154,18 +171,18 @@ const main = async () => {
 	step("service worker targets present");
 
 	await pollFor("our service worker to finish loading", 15_000, async () =>
-		(await evaluate(ourWorker.webSocketDebuggerUrl, `typeof globalThis.dispatch === "function"`)) === true ? true : null,
+		(await evaluateInWorker(port, `typeof globalThis.dispatch === "function"`)) === true ? true : null,
 	);
 
-	const listed = await evaluate(
-		ourWorker.webSocketDebuggerUrl,
+	const listed = await evaluateInWorker(
+		port,
 		`chrome.runtime.sendNativeMessage(${JSON.stringify(HOST_NAME)}, {type: "profiles.list"})`,
 	);
 	assert.equal(listed?.ok, true, JSON.stringify(listed?.error));
 	assert.equal(listed.current, PROFILE);
 	step("native host profiles.list reports current = smoke");
 
-	const accounts = await evaluate(ourWorker.webSocketDebuggerUrl, `dispatch({type: "accounts.list"}, {external: false})`);
+	const accounts = await evaluateInWorker(port, `dispatch({type: "accounts.list"}, {external: false})`);
 	assert.deepEqual(accounts, { ok: true, accounts: [] });
 	step("dispatcher accounts.list is empty");
 

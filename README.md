@@ -23,6 +23,21 @@ ccp install-host [--chromium-default]
 
 Each profile is its own Chromium `--user-data-dir` under `~/.config/chromium-claude-profiles/profiles/<name>`, launched with an unpacked copy of Claude in Chrome and the Claude Profiles extension. One profile per Claude account: `add` refuses an email another profile already uses, because two browsers on one account share a bridge channel.
 
+### Switching claude.ai accounts in your main profile
+
+1. `ccp install-host --chromium-default`
+2. In `chrome://extensions`, turn on Developer mode, choose Load unpacked and pick `extension/`.
+3. Sign in to claude.ai, open Claude Profiles and save the account under a label.
+4. Choose "Sign in another account", sign in, and save that one too. Never log out of a saved
+   account: logging out revokes its session, and switching to it then fails and leaves you where you were.
+
+Switching only changes the claude.ai login in this profile's tabs. Claude in Chrome keeps its own
+login, so run one `ccp` profile per account for parallel Claude in Chrome instances.
+
+After pulling a new version, press reload on the extension in `chrome://extensions`. Chromium keeps
+serving the old service worker to an extension loaded with `--load-extension` across restarts and
+version bumps, so `ccp launch` profiles need the same reload.
+
 ### Pairing Claude Code with a profile
 
 ```sh
@@ -64,4 +79,5 @@ If you put two profiles on one account by hand, Claude Code asks which browser t
 
 ```sh
 node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'
+node tests/e2e/smoke.ts
 ```
