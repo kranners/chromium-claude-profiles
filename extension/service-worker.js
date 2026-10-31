@@ -2,10 +2,15 @@ import { EXTERNAL_TYPES, NATIVE_TYPES, POPUP_TYPES, failure, isRequest } from ".
 import { sendNative } from "./lib/native.js";
 import { forgetAccount, listAccounts, saveAccount, signInAnother, switchAccount } from "./lib/jars.js";
 
+const withoutEmail = ({ email: _email, ...rest }) => rest;
+
 const accountHandlers = {
 	"accounts.list": () => listAccounts(),
 	"accounts.save": (msg) => saveAccount(msg.label),
-	"accounts.switch": (msg) => switchAccount(msg.label),
+	"accounts.switch": async (msg, external) => {
+		const result = await switchAccount(msg.label);
+		return external ? withoutEmail(result) : result;
+	},
 	"accounts.forget": (msg) => forgetAccount(msg.label),
 	"accounts.signIn": () => signInAnother(),
 };
@@ -18,7 +23,7 @@ export const dispatch = async (msg, { external }) => {
 	if (!allowed.has(msg.type)) return unsupported(msg.type);
 	try {
 		if (NATIVE_TYPES.has(msg.type)) return await sendNative(msg);
-		return await accountHandlers[msg.type](msg);
+		return await accountHandlers[msg.type](msg, external);
 	} catch (error) {
 		return failure("internal", error instanceof Error ? error.message : String(error));
 	}

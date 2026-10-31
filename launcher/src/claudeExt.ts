@@ -55,7 +55,12 @@ export const vendorClaudeExtension = (home: string, sourceDir: string): string |
 	const staging = `${target}.${process.pid}.tmp`;
 	rmSync(staging, { recursive: true, force: true });
 	cpSync(found.dir, staging, { recursive: true });
-	rmSync(target, { recursive: true, force: true });
-	renameSync(staging, target);
+	try {
+		renameSync(staging, target);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if ((code !== "EEXIST" && code !== "ENOTEMPTY") || !existsSync(join(target, "manifest.json"))) throw error;
+		rmSync(staging, { recursive: true, force: true });
+	}
 	return target;
 };

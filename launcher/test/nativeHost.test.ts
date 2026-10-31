@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { createDecoder, createNativeHandler, encodeMessage, runNativeHost, userDataDirFromArgs } from "../src/nativeHost.ts";
+import { createDecoder, createNativeHandler, currentProfileFromParent, encodeMessage, runNativeHost } from "../src/nativeHost.ts";
+import { profilesFile, userDataDir } from "../src/paths.ts";
+import { userDataDirFromArgs } from "../src/running.ts";
 import { tempContext } from "./helpers.ts";
 
 const ORIGIN = "chrome-extension://bkgjdpakjigjgdggfcckikppbjjcdkim/";
@@ -76,4 +81,19 @@ test("userDataDirFromArgs reads the flag up to the next flag", () => {
 	);
 	assert.equal(userDataDirFromArgs("Chromium --user-data-dir=/p/y"), "/p/y");
 	assert.equal(userDataDirFromArgs("Chromium --no-first-run"), null);
+});
+
+test("currentProfileFromParent gives null when profiles.json is unreadable", async () => {
+	const ctx = tempContext();
+	mkdirSync(ctx.home, { recursive: true });
+	writeFileSync(profilesFile(ctx.home), "{ truncated");
+	const parent = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", `--user-data-dir=${userDataDir(ctx.home, "a")}`], {
+		stdio: "ignore",
+	});
+	try {
+		assert.equal(currentProfileFromParent(ctx.home, parent.pid), null);
+	} finally {
+		parent.kill();
+		await once(parent, "exit");
+	}
 });

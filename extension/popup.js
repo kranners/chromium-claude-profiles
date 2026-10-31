@@ -19,15 +19,18 @@ const showMessage = (id, text) => {
 	node.hidden = !text;
 };
 
-const button = (label, onClick) =>
-	element("button", {
-		type: "button",
-		textContent: label,
-		onclick: async (event) => {
-			event.currentTarget.disabled = true;
+const button = (label, onClick) => {
+	const node = element("button", { type: "button", textContent: label });
+	node.onclick = async () => {
+		node.disabled = true;
+		try {
 			await onClick();
-		},
-	});
+		} finally {
+			node.disabled = false;
+		}
+	};
+	return node;
+};
 
 const profileRow = (profile, current) =>
 	element("li", { className: "row" }, [
@@ -100,8 +103,8 @@ const renderAccounts = async () => {
 
 const launchProfile = async (name) => {
 	const result = await sendNative({ type: "profiles.launch", name });
-	showMessage("profiles-error", result.ok ? null : result.error.message);
 	await refreshProfiles();
+	if (!result.ok) showMessage("profiles-error", result.error.message);
 };
 
 const switchAccount = async (label) => {

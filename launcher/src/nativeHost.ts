@@ -5,6 +5,7 @@ import { handleNative } from "./protocol.ts";
 import type { Context } from "./protocol.ts";
 import { fail, readProfiles } from "./store.ts";
 import { userDataDir } from "./paths.ts";
+import { userDataDirFromArgs } from "./running.ts";
 
 export const EXPECTED_ORIGIN = `chrome-extension://${EXTENSION_ID}/`;
 export const MAX_RESPONSE_BYTES = 1_000_000;
@@ -68,9 +69,6 @@ const realpathOrSelf = (path: string): string => {
 	}
 };
 
-export const userDataDirFromArgs = (args: string): string | null =>
-	/--user-data-dir=(.+?)(?= --|$)/.exec(args.trim())?.[1] ?? null;
-
 export const currentProfileFromParent = (home: string, ppid: number = process.ppid): string | null => {
 	let args: string;
 	try {
@@ -81,8 +79,12 @@ export const currentProfileFromParent = (home: string, ppid: number = process.pp
 	const dir = userDataDirFromArgs(args);
 	if (dir === null) return null;
 	const parentDir = realpathOrSelf(dir);
-	const match = readProfiles(home).find((profile) => realpathOrSelf(userDataDir(home, profile.name)) === parentDir);
-	return match?.name ?? null;
+	try {
+		const match = readProfiles(home).find((profile) => realpathOrSelf(userDataDir(home, profile.name)) === parentDir);
+		return match?.name ?? null;
+	} catch {
+		return null;
+	}
 };
 
 export const createNativeHandler = (origin: string | undefined, ctx: Context): ((msg: unknown) => Promise<unknown>) =>

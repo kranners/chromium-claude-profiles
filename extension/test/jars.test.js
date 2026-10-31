@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { forgetAccount, isInfraCookie, summarizeJars, switchAccount, toSavedCookie, toSetDetails } from "../lib/jars.js";
 import { EXTERNAL_TYPES, POPUP_TYPES, isLabel } from "../lib/protocol.js";
 
@@ -117,4 +118,98 @@ test("inherited Object members are not saved accounts and leave cookies untouche
 	} finally {
 		delete globalThis.chrome;
 	}
+});
+
+const yieldTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+const mockBrowser = (initialCookies, jars, accountFetch) => {
+	let cookies = initialCookies.map((c) => ({ ...c }));
+	const reloaded = [];
+	globalThis.chrome = {
+		storage: {
+			local: {
+				get: async () => (await yieldTurn(), { jars }),
+				set: async () => yieldTurn(),
+			},
+		},
+		cookies: {
+			getAll: async () => (await yieldTurn(), cookies.map((c) => ({ ...c }))),
+			remove: async ({ name }) => {
+				await yieldTurn();
+				cookies = cookies.filter((c) => c.name !== name);
+			},
+			set: async ({ name, value }) => {
+				await yieldTurn();
+				cookies = [...cookies.filter((c) => c.name !== name), chromeCookie({ name, value })];
+			},
+		},
+		tabs: { query: async () => [{ id: 1 }], reload: async (id) => reloaded.push(id) },
+	};
+	globalThis.fetch = accountFetch;
+	return { cookies: () => cookies.map(({ name, value }) => `${name}=${value}`).sort(), reloaded };
+};
+
+const jarOf = (session, org) => ({
+	savedAt: "2026-01-01T00:00:00.000Z",
+	cookies: [toSavedCookie(chromeCookie({ value: session })), toSavedCookie(chromeCookie({ name: "lastActiveOrg", value: org }))],
+});
+
+const restoreGlobals = () => {
+	delete globalThis.chrome;
+	delete globalThis.fetch;
+};
+
+test("a failed session check restores the previous cookies", async () => {
+	const browser = mockBrowser([chromeCookie({ value: "PREV" })], { A: jarOf("A", "orgA") }, async () => {
+		throw new TypeError("Failed to fetch");
+	});
+	try {
+		const result = await switchAccount("A");
+		assert.equal(result.error.code, "session_expired");
+		assert.deepEqual(browser.cookies(), ["sessionKey=PREV"]);
+		assert.deepEqual(browser.reloaded, []);
+	} finally {
+		restoreGlobals();
+	}
+});
+
+test("concurrent switches run one at a time and never mix cookies", async () => {
+	const browser = mockBrowser(
+		[chromeCookie({ value: "PREV" })],
+		{ A: jarOf("A", "orgA"), B: { ...jarOf("B", "orgB"), cookies: jarOf("B", "orgB").cookies.reverse() } },
+		async () => ({ ok: true, json: async () => ({ email_address: "x@example.com" }) }),
+	);
+	try {
+		const results = await Promise.all([switchAccount("A"), switchAccount("B")]);
+		assert.deepEqual(results.map((result) => result.ok), [true, true]);
+		assert.deepEqual(browser.cookies(), ["lastActiveOrg=orgB", "sessionKey=B"]);
+	} finally {
+		restoreGlobals();
+	}
+});
+
+test("external callers never see the switched account's email", async () => {
+	const browser = mockBrowser([chromeCookie({ value: "PREV" })], { A: jarOf("A", "orgA") }, async () => ({
+		ok: true,
+		json: async () => ({ email_address: "a@example.com" }),
+	}));
+	const listener = { addListener: () => {} };
+	Object.assign(globalThis.chrome, {
+		runtime: { onStartup: listener, onInstalled: listener, onMessage: listener, onMessageExternal: listener },
+		offscreen: { hasDocument: async () => true },
+	});
+	try {
+		const { dispatch } = await import("../service-worker.js");
+		assert.deepEqual(await dispatch({ type: "accounts.switch", label: "A" }, { external: true }), { ok: true, reloadedTabs: 1 });
+		assert.equal((await dispatch({ type: "accounts.switch", label: "A" }, { external: false })).email, "a@example.com");
+		assert.equal(browser.reloaded.length, 2);
+	} finally {
+		restoreGlobals();
+		delete globalThis.dispatch;
+	}
+});
+
+test("only named https origins may message the extension", async () => {
+	const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+	for (const match of manifest.externally_connectable.matches) assert.match(match, /^https:\/\//);
 });

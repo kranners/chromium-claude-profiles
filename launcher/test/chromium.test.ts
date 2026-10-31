@@ -64,7 +64,7 @@ test("launch vendors Claude in Chrome, writes host manifests and waits for the l
 			`printf '%s\\n' "$@" > '${argsLog}'`,
 			'for arg in "$@"; do case $arg in --user-data-dir=*) udd=${arg#--user-data-dir=} ;; esac; done',
 			'ln -s "$(hostname)-$$" "$udd/SingletonLock"',
-			"exec sleep 30",
+			"while :; do sleep 1; done",
 			"",
 		].join("\n"),
 		{ mode: 0o755 },

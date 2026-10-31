@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { symlinkSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { isRunning, parseSingletonLock } from "../src/running.ts";
+import { isBrowserFor, isRunning, parseSingletonLock } from "../src/running.ts";
 import { tempDir } from "./helpers.ts";
 
 test("parseSingletonLock splits on the last dash", () => {
@@ -38,4 +41,30 @@ test("isRunning passes the lock pid to alive", () => {
 
 test("a missing lock is not running", () => {
 	assert.deepEqual(isRunning(tempDir(), "pilot", () => true), { running: false, pid: null });
+});
+
+const withProcess = async (args: string[], check: (pid: number) => void): Promise<void> => {
+	const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", ...args], { stdio: "ignore" });
+	try {
+		check(child.pid as number);
+	} finally {
+		child.kill();
+		await once(child, "exit");
+	}
+};
+
+test("isBrowserFor needs the pid to run with this user-data-dir", async () => {
+	const dir = tempDir();
+	await withProcess([`--user-data-dir=${dir}`, "--no-first-run"], (pid) => {
+		assert.equal(isBrowserFor(dir, pid), true);
+		assert.equal(isBrowserFor(`${dir}x`, pid), false);
+	});
+	await withProcess([], (pid) => assert.equal(isBrowserFor(dir, pid), false));
+});
+
+test("a stale lock whose pid now belongs to another process is not running", async () => {
+	await withProcess([], (pid) => {
+		const dir = lockedDir(`${hostname()}-${pid}`);
+		assert.deepEqual(isRunning(dir), { running: false, pid: null });
+	});
 });

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, statSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import { ccpHome, profilesFile, userDataDir } from "../src/paths.ts";
 import { handle } from "../src/protocol.ts";
+import { addProfile, readProfiles } from "../src/store.ts";
 import { tempContext } from "./helpers.ts";
 
 test("add, list and remove round-trip", async () => {
@@ -77,4 +79,60 @@ test("configDir must be an absolute existing directory, and env needs it", async
 
 test("a relative CCP_HOME resolves to an absolute home", () => {
 	assert.equal(ccpHome({ CCP_HOME: "relhome" }), resolve("relhome"));
+});
+
+const writeRaw = (home: string, profiles: unknown[]): void => {
+	mkdirSync(home, { recursive: true });
+	writeFileSync(profilesFile(home), JSON.stringify({ schemaVersion: 1, profiles }));
+};
+
+test("entries missing email or configDir are kept and still count for duplicates", async () => {
+	const ctx = tempContext();
+	writeRaw(ctx.home, [{ name: "old", email: "a@example.com", createdAt: "2026-01-01T00:00:00.000Z", extra: 1 }]);
+	assert.deepEqual(readProfiles(ctx.home), [
+		{ name: "old", email: "a@example.com", configDir: null, createdAt: "2026-01-01T00:00:00.000Z", extra: 1 },
+	]);
+	const duplicate = await handle({ type: "profiles.add", name: "new", email: "a@example.com" }, ctx);
+	assert.equal(!duplicate.ok && duplicate.error.code, "already_exists");
+	assert.equal((await handle({ type: "profiles.add", name: "new" }, ctx)).ok, true);
+	assert.deepEqual(readProfiles(ctx.home).map((profile) => profile.name), ["old", "new"]);
+});
+
+test("an unusable entry throws instead of being dropped on the next write", () => {
+	const ctx = tempContext();
+	writeRaw(ctx.home, [{ name: "ok", createdAt: "x" }, { email: "nameless@example.com" }]);
+	assert.throws(() => readProfiles(ctx.home), /unknown schema/);
+	assert.throws(() => addProfile(ctx.home, { name: "another" }), /unknown schema/);
+	assert.equal(JSON.parse(readFileSync(profilesFile(ctx.home), "utf8")).profiles.length, 2);
+});
+
+test("concurrent adds from separate processes keep every profile", async () => {
+	const ctx = tempContext();
+	const storeUrl = new URL("../src/store.ts", import.meta.url).href;
+	const names = Array.from({ length: 12 }, (_, index) => `p${index}`);
+	await Promise.all(
+		names.map(
+			(name) =>
+				new Promise<void>((resolveRun, rejectRun) => {
+					const child = spawn(process.execPath, [
+						"--input-type=module",
+						"-e",
+						`import { addProfile } from ${JSON.stringify(storeUrl)}; if (!addProfile(${JSON.stringify(ctx.home)}, { name: ${JSON.stringify(name)} }).ok) process.exit(2);`,
+					]);
+					child.on("error", rejectRun);
+					child.on("exit", (code) => (code === 0 ? resolveRun() : rejectRun(new Error(`${name} exited ${code}`))));
+				}),
+		),
+	);
+	assert.deepEqual(readProfiles(ctx.home).map((profile) => profile.name).sort(), [...names].sort());
+	assert.equal(existsSync(`${profilesFile(ctx.home)}.lock`), false);
+});
+
+test("a lock left by a dead process is broken", () => {
+	const ctx = tempContext();
+	mkdirSync(ctx.home, { recursive: true });
+	const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" });
+	writeFileSync(`${profilesFile(ctx.home)}.lock`, dead.stdout);
+	assert.equal(addProfile(ctx.home, { name: "a" }).ok, true);
+	assert.equal(existsSync(`${profilesFile(ctx.home)}.lock`), false);
 });

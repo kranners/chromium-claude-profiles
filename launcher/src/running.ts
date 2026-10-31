@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readlinkSync } from "node:fs";
 import { hostname as osHostname } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,23 @@ export const pidAlive = (pid: number): boolean => {
 	}
 };
 
+export const userDataDirFromArgs = (args: string): string | null =>
+	/--user-data-dir=(.+?)(?= --|$)/.exec(args.trim())?.[1] ?? null;
+
+const processArgs = (pid: number): string | null => {
+	try {
+		return execFileSync("ps", ["-ww", "-o", "args=", "-p", String(pid)], { encoding: "utf8" });
+	} catch {
+		return null;
+	}
+};
+
+export const isBrowserFor = (userDataDir: string, pid: number): boolean => {
+	if (!pidAlive(pid)) return false;
+	const args = processArgs(pid);
+	return args !== null && userDataDirFromArgs(args) === userDataDir;
+};
+
 const readLock = (userDataDir: string): string | null => {
 	try {
 		return readlinkSync(join(userDataDir, "SingletonLock"));
@@ -32,7 +50,7 @@ const readLock = (userDataDir: string): string | null => {
 export const isRunning = (
 	userDataDir: string,
 	hostname: string = osHostname(),
-	alive: (pid: number) => boolean = pidAlive,
+	alive: (pid: number) => boolean = (pid) => isBrowserFor(userDataDir, pid),
 ): { running: boolean; pid: number | null } => {
 	const target = readLock(userDataDir);
 	const lock = target === null ? null : parseSingletonLock(target);

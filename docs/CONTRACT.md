@@ -341,7 +341,7 @@ ccp native-host <origin>      # invoked by Chromium only
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Claude Profiles" },
   "externally_connectable": {
-    "matches": ["http://localhost/*", "http://127.0.0.1/*", "https://claude.ai/*", "https://*.claude.ai/*", "https://kanban.cute.engineer/*"]
+    "matches": ["https://claude.ai/*", "https://*.claude.ai/*", "https://kanban.cute.engineer/*"]
   }
 }
 ```

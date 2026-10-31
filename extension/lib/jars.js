@@ -65,9 +65,19 @@ const signedInEmail = async () => {
 	return (await response.json()).email_address ?? null;
 };
 
+let queue = Promise.resolve();
+
+const serial =
+	(fn) =>
+	(...args) => {
+		const run = queue.then(() => fn(...args));
+		queue = run.catch(() => undefined);
+		return run;
+	};
+
 export const listAccounts = async () => ({ ok: true, accounts: summarizeJars(await readJars()) });
 
-export const saveAccount = async (label) => {
+export const saveAccount = serial(async (label) => {
 	if (!isLabel(label)) return invalidLabel();
 	const cookies = await accountCookies();
 	if (!cookies.some((c) => c.name === SESSION_COOKIE)) {
@@ -77,7 +87,7 @@ export const saveAccount = async (label) => {
 	const jar = { savedAt: new Date().toISOString(), cookies: cookies.map(toSavedCookie) };
 	await writeJars({ ...(await readJars()), [label]: jar });
 	return { ok: true, account: toAccountSummary(label, jar) };
-};
+});
 
 const clearAccountCookies = async () => {
 	for (const c of await accountCookies()) {
@@ -85,11 +95,11 @@ const clearAccountCookies = async () => {
 	}
 };
 
-export const signInAnother = async () => {
+export const signInAnother = serial(async () => {
 	await clearAccountCookies();
 	await chrome.tabs.create({ url: "https://claude.ai/login" });
 	return { ok: true };
-};
+});
 
 const replaceAccountCookies = async (cookies) => {
 	await clearAccountCookies();
@@ -98,12 +108,12 @@ const replaceAccountCookies = async (cookies) => {
 	}
 };
 
-export const switchAccount = async (label) => {
+export const switchAccount = serial(async (label) => {
 	if (!isLabel(label)) return invalidLabel();
 	const jar = savedJar(await readJars(), label);
 	if (!Array.isArray(jar?.cookies)) return unknownLabel(label);
 	const previous = (await accountCookies()).map(toSavedCookie);
-	const email = await replaceAccountCookies(jar.cookies).then(signedInEmail, () => null);
+	const email = await replaceAccountCookies(jar.cookies).then(signedInEmail).catch(() => null);
 	if (!email) {
 		await replaceAccountCookies(previous);
 		return failure("session_expired", `The saved session for "${label}" is no longer valid. Sign in to it again and re-save it.`);
@@ -111,13 +121,13 @@ export const switchAccount = async (label) => {
 	const tabs = await chrome.tabs.query({ url: CLAUDE_TAB_PATTERNS });
 	await Promise.all(tabs.map((tab) => chrome.tabs.reload(tab.id)));
 	return { ok: true, email, reloadedTabs: tabs.length };
-};
+});
 
-export const forgetAccount = async (label) => {
+export const forgetAccount = serial(async (label) => {
 	if (!isLabel(label)) return invalidLabel();
 	const jars = await readJars();
 	if (!savedJar(jars, label)) return unknownLabel(label);
 	const { [label]: _forgotten, ...rest } = jars;
 	await writeJars(rest);
 	return { ok: true };
-};
+});
