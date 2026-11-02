@@ -93,6 +93,38 @@ h1 {
 	font-size: 12px;
 }
 
+.name:has(.chip) {
+	white-space: normal;
+}
+
+.chip {
+	display: inline-block;
+	white-space: nowrap;
+	margin-left: 6px;
+	padding: 0 6px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	color: var(--muted);
+	font-size: 11px;
+}
+
+.chip.ok {
+	color: var(--running);
+}
+
+.chip.revoked {
+	border-color: var(--error);
+	color: var(--error);
+}
+
+.relogin {
+	margin: 0 0 8px;
+}
+
+#relogin {
+	margin-bottom: 8px;
+}
+
 .this-window {
 	margin-left: 4px;
 	color: var(--muted);

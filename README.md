@@ -36,11 +36,45 @@ login, so run one `ccp` profile per account for parallel Claude in Chrome instan
 
 After pulling a new version, press "Reload extension" in the popup, in every profile. Chromium keeps
 serving the old service worker to an extension loaded with `--load-extension` across restarts and
-version bumps. The popup itself always loads fresh from disk.
+version bumps. The popup itself always loads fresh from disk. Turn on Developer mode in
+`chrome://extensions` in each profile first: without it, Chromium 155 disables the extension on reload
+("Turn on developer mode to use this extension"), and after you turn it on you have to press the
+extension's own reload button there to get the new version.
 
 The popup opens instantly because an offscreen document keeps the extension's process alive; without
 it a busy machine spends about a second starting a renderer for every open. "Launcher answered in N ms"
 under the profile list confirms the native host is working.
+
+### Signed-out accounts
+
+The popup checks every saved account when it opens, and hourly in the background, without switching
+to it. Each account shows "Signed in", "Signed out" or "Couldn't check", and the toolbar badge counts
+the signed-out ones.
+
+"Sign back in to signed-out accounts" has Claude Code drive this profile's Claude in Chrome through
+each account's emailed login link. It needs:
+
+- the popup open in a `ccp` profile window whose Claude in Chrome is signed in;
+- a Claude Code config dir signed in to that same account: a profile's `--config-dir`, or any
+  subdirectory of a directory in `CCP_DRIVER_DIRS`;
+- `~/.config/chromium-claude-profiles/relogin.json`, telling it where each account's mail is read:
+
+```json
+{"mailboxes": [
+  {"match": "@example.com", "url": "https://mail.example.com/?u={email}#search", "priority": 10},
+  {"match": "me@example.org", "url": "https://mail.example.org/"}
+]}
+```
+
+`@domain` matches that domain and its subdomains; anything else matches one address. `{email}` is
+replaced with the address, URLs must be https, and higher `priority` goes first. Accounts with no
+mailbox are skipped. While it runs, the popup lists the pending accounts with a Cancel button, which
+also stops Claude Code. It ends when Claude Code exits, or gives up after 20 minutes, and puts back
+the account you were using. Each run logs to
+`~/.config/chromium-claude-profiles/logs/relogin-<time>.log`. It stops rather than solve a CAPTCHA.
+
+The launcher runs inside Chromium, so set `CCP_CLAUDE` and `CCP_DRIVER_DIRS` where you run
+`ccp launch`; a running profile keeps the environment it started with.
 
 ### Pairing Claude Code with a profile
 
@@ -78,6 +112,8 @@ If you put two profiles on one account by hand, Claude Code asks which browser t
 | `CCP_EXTENSION_DIR` | `extension/` in this repository |
 | `CCP_EXTRA_ARGS` | extra Chromium flags, split on whitespace |
 | `CCP_NODE` | the Node binary `bin/ccp` runs |
+| `CCP_CLAUDE` | `/opt/homebrew/bin/claude`, the Claude Code that drives "sign back in" |
+| `CCP_DRIVER_DIRS` | none; colon-separated directories whose subdirectories are Claude Code config dirs "sign back in" may drive with |
 
 ### Tests
 
