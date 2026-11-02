@@ -1,4 +1,4 @@
-import { listAccounts } from "./lib/jars.js";
+import { listAccounts, reloginStatus } from "./lib/jars.js";
 import { sendNative } from "./lib/native.js";
 
 const PROFILES_CACHE_KEY = "profilesCache";
@@ -19,16 +19,18 @@ const showMessage = (id, text) => {
 	node.hidden = !text;
 };
 
+const disableWhile = (node, onClick) => async () => {
+	node.disabled = true;
+	try {
+		await onClick();
+	} finally {
+		node.disabled = false;
+	}
+};
+
 const button = (label, onClick) => {
 	const node = element("button", { type: "button", textContent: label });
-	node.onclick = async () => {
-		node.disabled = true;
-		try {
-			await onClick();
-		} finally {
-			node.disabled = false;
-		}
-	};
+	node.onclick = disableWhile(node, onClick);
 	return node;
 };
 
@@ -45,10 +47,27 @@ const profileRow = (profile, current) =>
 		button(profile.running ? "Focus" : "Launch", () => launchProfile(profile.name)),
 	]);
 
+const STATUS_CHIPS = {
+	ok: { text: "Signed in", className: "chip ok" },
+	revoked: { text: "Signed out", className: "chip revoked" },
+	unknown: { text: "Couldn't check", className: "chip" },
+};
+
+const UNCHECKED_CHIP = { text: "Unchecked", className: "chip" };
+
+const statusChip = ({ status, checkedAt }) => {
+	const chip = STATUS_CHIPS[status] ?? UNCHECKED_CHIP;
+	return element("span", {
+		className: chip.className,
+		textContent: chip.text,
+		title: checkedAt ? `Checked ${new Date(checkedAt).toLocaleString()}` : "Not checked yet",
+	});
+};
+
 const accountRow = (account) =>
 	element("li", { className: "row" }, [
 		element("span", { className: "identity" }, [
-			element("span", { className: "name", textContent: account.label }),
+			element("span", { className: "name" }, [account.label, statusChip(account)]),
 			element("span", {
 				className: "meta",
 				textContent: `${account.cookieCount} cookies, saved ${new Date(account.savedAt).toLocaleString()}`,
@@ -88,18 +107,42 @@ const refreshProfiles = async () => {
 	await chrome.storage.local.set({ [PROFILES_CACHE_KEY]: fresh });
 };
 
+const showRelogin = (accounts, relogin) => {
+	byId("relogin").hidden = Boolean(relogin) || !accounts.some((account) => account.status === "revoked");
+	byId("relogin-active").hidden = !relogin;
+	byId("relogin-pending").textContent = relogin
+		? `Signing back in: ${relogin.pending.join(", ")} — Claude is driving this browser`
+		: "";
+};
+
+const showAccounts = (accounts, relogin) => {
+	byId("accounts").replaceChildren(...(accounts.length ? accounts.map(accountRow) : [emptyRow("No saved accounts")]));
+	showRelogin(accounts, relogin);
+};
+
 const renderAccounts = async () => {
 	const result = await listAccounts();
-	const list = byId("accounts");
 	if (!result.ok) {
 		showMessage("accounts-error", result.error.message);
-		list.replaceChildren();
+		byId("accounts").replaceChildren();
 		return;
 	}
-	list.replaceChildren(
-		...(result.accounts.length ? result.accounts.map(accountRow) : [emptyRow("No saved accounts")]),
-	);
+	showAccounts(result.accounts, (await reloginStatus()).relogin);
 };
+
+const checkAccounts = async () => {
+	const result = await send({ type: "accounts.check" });
+	if (!result.ok) showMessage("accounts-error", result.error.message);
+};
+
+const driverText = (driver) =>
+	driver?.profile ? `Driven by the ${driver.profile} profile's Claude Code.` : "Driven by Claude Code.";
+
+const reloginResultText = ({ skipped, driver }) =>
+	[
+		...(skipped?.length ? [`Skipped: ${skipped.map(({ email, reason }) => `${email} (${reason})`).join(", ")}.`] : []),
+		driverText(driver),
+	].join(" ");
 
 const launchProfile = async (name) => {
 	const result = await sendNative({ type: "profiles.launch", name });
@@ -110,13 +153,11 @@ const launchProfile = async (name) => {
 const switchAccount = async (label) => {
 	const result = await send({ type: "accounts.switch", label });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
-	await renderAccounts();
 };
 
 const forgetAccount = async (label) => {
 	const result = await send({ type: "accounts.forget", label });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
-	await renderAccounts();
 };
 
 byId("save-form").addEventListener("submit", async (event) => {
@@ -126,7 +167,25 @@ byId("save-form").addEventListener("submit", async (event) => {
 	const result = await send({ type: "accounts.save", label });
 	showMessage("accounts-error", result.ok ? null : result.error.message);
 	if (result.ok) form.reset();
-	await renderAccounts();
+});
+
+byId("relogin").addEventListener(
+	"click",
+	disableWhile(byId("relogin"), async () => {
+		const result = await send({ type: "accounts.relogin" });
+		showMessage("accounts-error", result.ok ? null : result.error.message);
+		if (result.ok) showMessage("relogin-result", result.started ? reloginResultText(result) : result.message);
+	}),
+);
+
+byId("relogin-cancel").addEventListener("click", async () => {
+	const result = await send({ type: "accounts.reloginCancel" });
+	showMessage("accounts-error", result.ok ? null : result.error.message);
+	showMessage("relogin-result", null);
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+	if ("jars" in changes || "relogin" in changes) renderAccounts();
 });
 
 byId("reload").addEventListener("click", () => chrome.runtime.reload());
@@ -136,5 +195,5 @@ byId("sign-in-another").addEventListener("click", async () => {
 	showMessage("accounts-error", result.ok ? null : result.error.message);
 });
 
-renderAccounts();
+renderAccounts().then(checkAccounts);
 showCachedProfiles().then(refreshProfiles);

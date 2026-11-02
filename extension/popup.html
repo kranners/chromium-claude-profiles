@@ -23,6 +23,9 @@
 			<button id="sign-in-another" type="button">Sign in another account</button>
 			<p class="helper">Save the current account first; this signs the tabs out locally without logging the saved session out.</p>
 			<p id="accounts-error" class="error" hidden></p>
+			<button id="relogin" type="button" title="Claude Code drives this browser's Claude in Chrome to sign in by email link" hidden>Sign back in to signed-out accounts</button>
+			<p id="relogin-active" class="relogin" hidden><span id="relogin-pending"></span> <button id="relogin-cancel" type="button" class="link">Cancel</button></p>
+			<p id="relogin-result" class="helper" hidden></p>
 			<ul id="accounts" class="rows"></ul>
 		</section>
 	</body>

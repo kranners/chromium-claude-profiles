@@ -1,5 +1,6 @@
 import { isSafeUrl, launchProfile, prepareProfileHosts } from "./chromium.ts";
 import { VERSION } from "./paths.ts";
+import { normaliseEmails, reloginStatus, startRelogin, stopRelogin } from "./relogin.ts";
 import { addProfile, ensureHome, fail, findProfile, isValidName, readProfiles, removeProfile, viewOf } from "./store.ts";
 
 export type Profile = { name: string; email: string | null; configDir: string | null; createdAt: string };
@@ -19,7 +20,7 @@ export type Result<T extends object> = ({ ok: true } & T) | Failure;
 
 export type Context = { home: string; env: NodeJS.ProcessEnv; current: string | null };
 
-export const NATIVE_HOST_TYPES: readonly string[] = ["ping", "profiles.list", "profiles.status", "profiles.launch"];
+export const NATIVE_HOST_TYPES: readonly string[] = ["ping", "profiles.list", "profiles.status", "profiles.launch", "relogin.start", "relogin.status", "relogin.stop"];
 
 type Request = { type: string; [param: string]: unknown };
 
@@ -76,19 +77,33 @@ const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<o
 	}
 };
 
-export const handle = async (req: unknown, ctx: Context): Promise<Result<object>> => {
+const dispatchNative = (req: Request, ctx: Context): Result<object> | Promise<Result<object>> => {
+	if (req.type === "relogin.status") return reloginStatus(ctx);
+	if (req.type === "relogin.stop") return stopRelogin(ctx);
+	if (req.type !== "relogin.start") return dispatch(req, ctx);
+	const emails = normaliseEmails(req.emails);
+	return emails === null ? fail("invalid_request", "emails must be 1 to 20 email addresses") : startRelogin(ctx, emails);
+};
+
+const run = async (
+	req: unknown,
+	ctx: Context,
+	route: (req: Request, ctx: Context) => Result<object> | Promise<Result<object>>,
+): Promise<Result<object>> => {
 	if (!isRequest(req)) return fail("invalid_request", "Request must be an object with a string type");
 	try {
-		return await dispatch(req, ctx);
+		return await route(req, ctx);
 	} catch (error) {
 		process.stderr.write(`ccp: ${req.type} failed: ${(error as Error).message}\n`);
 		return fail("internal", (error as Error).message);
 	}
 };
 
+export const handle = (req: unknown, ctx: Context): Promise<Result<object>> => run(req, ctx, dispatch);
+
 export const handleNative = (req: unknown, ctx: Context): Promise<Result<object>> => {
 	if (isRequest(req) && !NATIVE_HOST_TYPES.includes(req.type)) {
 		return Promise.resolve(fail("unsupported", `${req.type} is not available over the native host`));
 	}
-	return handle(req, ctx);
+	return run(req, ctx, dispatchNative);
 };
