@@ -199,23 +199,18 @@ test("reloginArgs builds the exact argv", () => {
 	]);
 });
 
-test("reloginEnv is an allowlist", () => {
-	process.env.CLAUDE_CODE_OAUTH_TOKEN = "leak";
-	try {
-		assert.deepEqual(
-			reloginEnv({ home: "/Users/me", user: "me", claudeBin: "/opt/bin/claude", configDir: "/Users/me/.claude-a", deviceId: DEVICE }),
-			{
-				HOME: "/Users/me",
-				USER: "me",
-				LOGNAME: "me",
-				PATH: "/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-				CLAUDE_CONFIG_DIR: "/Users/me/.claude-a",
-				CLAUDE_CHROME_PAIRED_DEVICE_ID: DEVICE,
-			},
-		);
-	} finally {
-		delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-	}
+test("reloginEnv sets the driver's config dir, device and path", () => {
+	assert.deepEqual(
+		reloginEnv({ home: "/Users/me", user: "me", claudeBin: "/opt/bin/claude", configDir: "/Users/me/.claude-a", deviceId: DEVICE }),
+		{
+			HOME: "/Users/me",
+			USER: "me",
+			LOGNAME: "me",
+			PATH: "/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+			CLAUDE_CONFIG_DIR: "/Users/me/.claude-a",
+			CLAUDE_CHROME_PAIRED_DEVICE_ID: DEVICE,
+		},
+	);
 });
 
 type Spawned = { command: string; args: string[]; options: SpawnOptions; unref: boolean };
@@ -242,7 +237,8 @@ const reloginSetup = () => {
 };
 
 test("startRelogin spawns the driver detached with a private log", () => {
-	const { ctx, claude, driver } = reloginSetup();
+	const { ctx: setup, claude, driver } = reloginSetup();
+	const ctx = { ...setup, env: { ...setup.env, CLAUDE_CODE_OAUTH_TOKEN: "leak", ANTHROPIC_API_KEY: "leak" } };
 	const calls: Spawned[] = [];
 	const result = startRelogin(ctx, ["b@example.com", "c@example.org"], { spawn: fakeSpawn(calls) });
 	assert.equal(result.ok, true);
@@ -263,6 +259,14 @@ test("startRelogin spawns the driver detached with a private log", () => {
 	assert.equal((call.options.stdio as unknown[])[0], "ignore");
 	assert.equal(call.options.env?.CLAUDE_CONFIG_DIR, driver);
 	assert.equal(call.options.env?.CLAUDE_CHROME_PAIRED_DEVICE_ID, DEVICE);
+	assert.deepEqual(Object.keys(call.options.env ?? {}).sort(), [
+		"CLAUDE_CHROME_PAIRED_DEVICE_ID",
+		"CLAUDE_CONFIG_DIR",
+		"HOME",
+		"LOGNAME",
+		"PATH",
+		"USER",
+	]);
 	assert.equal(call.unref, true);
 	assert.equal(readFileSync(ok.log, "utf8"), "");
 });
@@ -313,6 +317,10 @@ test("relogin.status and relogin.stop follow the spawned process group", async (
 	try {
 		assert.equal(startRelogin(ctx, ["b@example.com"], { spawn: fakeSpawn([], child.pid) }).ok, true);
 		assert.deepEqual(await handleNative({ type: "relogin.status" }, ctx), { ok: true, running: true });
+		assert.deepEqual(startRelogin(ctx, ["b@example.com"], { spawn: fakeSpawn([]) }), {
+			ok: false,
+			error: { code: "invalid_request", message: "Already signing back in" },
+		});
 		assert.deepEqual(await handleNative({ type: "relogin.stop" }, ctx), { ok: true, stopped: true });
 		await exited;
 		assert.deepEqual(await handleNative({ type: "relogin.status" }, ctx), { ok: true, running: false });

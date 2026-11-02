@@ -69,7 +69,7 @@ each account's emailed login link. It needs:
 `@domain` matches that domain and its subdomains; anything else matches one address. `{email}` is
 replaced with the address, URLs must be https, and higher `priority` goes first. Accounts with no
 mailbox are skipped. While it runs, the popup lists the pending accounts with a Cancel button, which
-also stops Claude Code. It ends when Claude Code exits, or gives up after 20 minutes, and puts back
+also stops Claude Code. It ends when Claude Code exits, or gives up after 20 minutes (6 per account beyond three), and puts back
 the account you were using. Each run logs to
 `~/.config/chromium-claude-profiles/logs/relogin-<time>.log`. It stops rather than solve a CAPTCHA.
 
