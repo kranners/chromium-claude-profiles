@@ -225,6 +225,7 @@ export const startRelogin = (
 	{ spawn = nodeSpawn as Spawn }: { spawn?: Spawn } = {},
 ): Result<{ order: string[]; skipped: ReloginPlan["skipped"]; driver: { profile: string | null }; log: string }> => {
 	if (ctx.current === null) return fail("invalid_request", "Sign back in runs from a ccp profile window");
+	if (isRunning(readRunPid(ctx.home, ctx.current))) return fail("invalid_request", "Already signing back in");
 	const profile = findProfile(ctx.home, ctx.current);
 	if (!profile) return fail("not_found", `No profile named ${ctx.current}`);
 	const identity = readClaudeInChromeIdentity(viewOf(ctx.home, profile).userDataDir);
@@ -297,9 +298,11 @@ const withRun = <T extends object>(ctx: Context, use: (pid: number | null, file:
 		? fail("invalid_request", "Sign back in runs from a ccp profile window")
 		: { ok: true, ...use(readRunPid(ctx.home, ctx.current), reloginPidFile(ctx.home, ctx.current)) };
 
+const isRunning = (pid: number | null): boolean => pid !== null && signalGroup(pid, 0);
+
 export const reloginStatus = (ctx: Context): Result<{ running: boolean }> =>
 	withRun(ctx, (pid, file) => {
-		const running = pid !== null && signalGroup(pid, 0);
+		const running = isRunning(pid);
 		if (!running) rmSync(file, { force: true });
 		return { running };
 	});

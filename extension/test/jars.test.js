@@ -370,6 +370,7 @@ test("signing back in records the new session, then restores the profile's own a
 		assert.equal(started.started, true);
 		assert.deepEqual(sent, [{ type: "relogin.start", emails: ["b@example.org"] }]);
 		assert.deepEqual(relogin.state.pending, ["b@example.org"]);
+		assert.equal(relogin.state.accounts, 1);
 		assert.equal(relogin.state.restoreLabel, "me@example.com");
 		assert.deepEqual(browser.cookies(), []);
 		await globalThis.chrome.cookies.set({ name: "sessionKey", value: "NEW" });
@@ -387,6 +388,30 @@ test("signing back in records the new session, then restores the profile's own a
 		assert.equal(browser.jars()["b@example.org"].check.status, "ok");
 		assert.deepEqual(browser.cookies(), ["sessionKey=LIVE"]);
 		assert.equal(JSON.stringify(started).includes("LIVE"), false);
+	} finally {
+		restoreGlobals();
+	}
+});
+
+test("signing back in retries a live check that could not reach claude.ai", async () => {
+	const { browser, relogin } = reloginBrowser();
+	try {
+		await startRelogin();
+		await globalThis.chrome.cookies.set({ name: "sessionKey", value: "NEW" });
+		const fetchBefore = globalThis.fetch;
+		let failures = 1;
+		globalThis.fetch = async (...request) => (failures-- > 0 ? Promise.reject(new TypeError("Failed to fetch")) : fetchBefore(...request));
+		const settleDelays = [];
+		const setTimeoutBefore = globalThis.setTimeout;
+		globalThis.setTimeout = (resume, delay) => (settleDelays.push(delay), resume());
+		try {
+			await onCookieChanged({ removed: false, cookie: { name: "sessionKey", domain: ".claude.ai" } });
+		} finally {
+			globalThis.setTimeout = setTimeoutBefore;
+		}
+		assert.deepEqual(settleDelays, [10_000, 10_000]);
+		assert.equal(relogin.state, undefined);
+		assert.deepEqual(browser.jars()["b@example.org"].cookies.map((c) => c.value), ["NEW"]);
 	} finally {
 		restoreGlobals();
 	}

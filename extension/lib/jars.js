@@ -3,7 +3,9 @@ import { sendNative } from "./native.js";
 
 const STORAGE_KEY = "jars";
 const RELOGIN_KEY = "relogin";
-const RELOGIN_TTL_MINUTES = 20;
+const RELOGIN_MINUTES = 20;
+const RELOGIN_MINUTES_PER_ACCOUNT = 6;
+const LIVE_CHECK_ATTEMPTS = 3;
 const SIGN_IN_SETTLE_MS = 10_000;
 const RELOGIN_EXPIRE_ALARM = "relogin-expire";
 const BADGE_COLOR = "#b3261e";
@@ -256,7 +258,9 @@ export const forgetAccount = serial(async (label) => {
 
 const readRelogin = async () => (await chrome.storage.local.get(RELOGIN_KEY))[RELOGIN_KEY] ?? null;
 
-const isExpired = (state) => Date.now() - Date.parse(state.startedAt) > RELOGIN_TTL_MINUTES * 60_000;
+const reloginMinutes = (accounts) => Math.max(RELOGIN_MINUTES, accounts * RELOGIN_MINUTES_PER_ACCOUNT);
+
+const isExpired = (state) => Date.now() - Date.parse(state.startedAt) > reloginMinutes(state.accounts) * 60_000;
 
 const endRelogin = async (state) => {
 	await chrome.alarms.clear(RELOGIN_EXPIRE_ALARM);
@@ -327,6 +331,7 @@ export const startRelogin = serial(async () => {
 	await chrome.storage.local.set({
 		[RELOGIN_KEY]: {
 			pending: response.order.map((email) => email.toLowerCase()),
+			accounts: response.order.length,
 			restoreLabel,
 			startedAt: new Date().toISOString(),
 			log: response.log ?? null,
@@ -344,10 +349,16 @@ export const cancelRelogin = serial(async () => {
 
 const settleSignIn = () => new Promise((resolve) => setTimeout(resolve, SIGN_IN_SETTLE_MS));
 
+const settledLive = async (attempts = LIVE_CHECK_ATTEMPTS) => {
+	await settleSignIn();
+	const live = await checkLive();
+	return live.status === "unknown" && attempts > 1 ? settledLive(attempts - 1) : live;
+};
+
 const captureRelogin = serial(async () => {
 	const state = await activeRelogin();
 	if (!state) return;
-	const live = await checkLive();
+	const live = await settledLive();
 	const email = live.status === "ok" ? live.email.toLowerCase() : null;
 	if (!state.pending.includes(email)) return;
 	const jars = await readJars();
@@ -356,7 +367,6 @@ const captureRelogin = serial(async () => {
 	const cookies = (await accountCookies()).map(toSavedCookie);
 	await writeJars({ ...jars, [label]: withCookies(savedJar(jars, label) ?? {}, cookies, live) });
 	const pending = state.pending.filter((pendingEmail) => pendingEmail !== email);
-	await settleSignIn();
 	if (!pending.length) {
 		await endRelogin(state);
 		return;
