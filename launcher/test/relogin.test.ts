@@ -92,9 +92,14 @@ test("normaliseEmails lowercases, dedupes and bounds the list", () => {
 
 test("loadMailboxes: missing file is empty, bad entries name the reason", () => {
 	const home = tempDir();
-	assert.deepEqual(loadMailboxes(home), { ok: true, mailboxes: [] });
+	assert.deepEqual(loadMailboxes(home), { ok: true, mailboxes: [], driverDirs: [], claude: null });
 	writeFileSync(join(home, "relogin.json"), JSON.stringify({ mailboxes: [{ match: "@Example.com", url: "https://mail.example.com/?u={email}" }] }));
-	assert.deepEqual(loadMailboxes(home), { ok: true, mailboxes: [mailbox("@example.com", "https://mail.example.com/?u={email}")] });
+	assert.deepEqual(loadMailboxes(home), {
+		ok: true,
+		mailboxes: [mailbox("@example.com", "https://mail.example.com/?u={email}")],
+		driverDirs: [],
+		claude: null,
+	});
 	const cases: [unknown, RegExp][] = [
 		[{ mailboxes: [{ match: "@example.com", url: "http://mail.example.com/" }] }, /url must be an https URL/],
 		[{ mailboxes: [{ match: "@example.com", url: "https://a,b)/" }] }, /url must be an https URL/],
@@ -285,7 +290,7 @@ test("startRelogin refuses without a profile, identity, driver, mailbox or claud
 	const message = (result: { ok: boolean }) => (result as { error: { message: string } }).error.message;
 	const spawn = fakeSpawn([]);
 	const none = reloginSetup();
-	assert.match(message(startRelogin({ ...none.ctx, current: null }, ["b@example.com"], { spawn })), /from a ccp profile window/);
+	assert.match(message(startRelogin({ ...none.ctx, current: null }, ["b@example.com"], { spawn })), /Claude in Chrome in this profile is not signed in/);
 	const noIdentity = reloginSetup();
 	writeFileSync(join(claudeInChromeStorageDir(userDataDir(noIdentity.ctx.home, "a")), "000003.log"), "");
 	assert.match(message(startRelogin(noIdentity.ctx, ["b@example.com"], { spawn })), /Claude in Chrome in this profile is not signed in/);
@@ -306,8 +311,26 @@ test("relogin.start is native-only and validates emails", async () => {
 		const result = await handleNative({ type: "relogin.start", emails }, ctx);
 		assert.equal(!result.ok && result.error.code, "invalid_request", JSON.stringify(emails));
 	}
-	const noWindow = await handleNative({ type: "relogin.start", emails: ["b@example.com"] }, { ...ctx, current: null });
-	assert.deepEqual(noWindow, { ok: false, error: { code: "invalid_request", message: "Sign back in runs from a ccp profile window" } });
+});
+
+test("startRelogin runs from the main Chromium with relogin.json's driverDirs and claude", () => {
+	const { root, ctx: setup, claude } = reloginSetup();
+	const main = join(setup.env.HOME as string, "Library", "Application Support", "Chromium");
+	writeIdentity(main, ACCOUNT, DEVICE);
+	const driver = writeConfigDir(join(root, "elsewhere", "personal"), ACCOUNT);
+	writeFileSync(
+		join(setup.home, "relogin.json"),
+		JSON.stringify({ mailboxes: [{ match: "@example.com", url: "https://mail.example.com/" }], driverDirs: [driver], claude }),
+	);
+	const env = { ...setup.env, CCP_DRIVER_DIRS: "", CCP_CLAUDE: "" };
+	const calls: Spawned[] = [];
+	const result = startRelogin({ ...setup, env, current: null }, ["b@example.com"], { spawn: fakeSpawn(calls, 4242) });
+	assert.equal(result.ok, true);
+	assert.equal(calls[0].command, claude);
+	assert.equal((calls[0].options.env as Record<string, string>).CLAUDE_CONFIG_DIR, driver);
+	assert.equal(readFileSync(join(setup.home, "logs", "relogin-main.pid"), "utf8"), "4242");
+	writeFileSync(join(setup.home, "relogin.json"), JSON.stringify({ mailboxes: [], driverDirs: ["relative"] }));
+	assert.match(JSON.stringify(startRelogin({ ...setup, env, current: null }, ["b@example.com"], { spawn: fakeSpawn([]) })), /driverDirs must be absolute/);
 });
 
 test("relogin.status and relogin.stop follow the spawned process group", async () => {

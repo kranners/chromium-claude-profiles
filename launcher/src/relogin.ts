@@ -5,6 +5,8 @@ import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { readClaudeInChromeIdentity } from "./claudeInChrome.ts";
 import type { Context, Result } from "./protocol.ts";
+import { MAIN_BROWSER } from "./bridge.ts";
+import { chromiumSupportDir } from "./paths.ts";
 import { fail, findProfile, readProfiles, viewOf } from "./store.ts";
 
 export type Mailbox = { match: string; url: string; priority: number };
@@ -66,12 +68,13 @@ const subdirectories = (parent: string): string[] => {
 	}
 };
 
-const driverCandidates = (home: string, env: NodeJS.ProcessEnv): DriverCandidate[] => [
+const driverCandidates = (home: string, env: NodeJS.ProcessEnv, extraDirs: string[] = []): DriverCandidate[] => [
 	...readProfiles(home).flatMap((profile) => (profile.configDir === null ? [] : [{ dir: profile.configDir, profile: profile.name }])),
 	...(env.CCP_DRIVER_DIRS ?? "")
 		.split(":")
 		.filter(Boolean)
 		.flatMap((parent) => subdirectories(parent).map((dir) => ({ dir, profile: null }))),
+	...extraDirs.map((dir) => ({ dir, profile: null })),
 ];
 
 const isMatch = (match: unknown): match is string =>
@@ -96,21 +99,30 @@ const toMailbox = (value: unknown, index: number): Mailbox | string => {
 	return { match: match.toLowerCase(), url, priority };
 };
 
-export const loadMailboxes = (home: string): Result<{ mailboxes: Mailbox[] }> => {
+export type ReloginSettings = { mailboxes: Mailbox[]; driverDirs: string[]; claude: string | null };
+
+const isAbsolutePath = (value: unknown): value is string => typeof value === "string" && value.startsWith("/");
+
+export const loadMailboxes = (home: string): Result<ReloginSettings> => {
 	const file = reloginFile(home);
-	if (!existsSync(file)) return { ok: true, mailboxes: [] };
+	if (!existsSync(file)) return { ok: true, mailboxes: [], driverDirs: [], claude: null };
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(readFileSync(file, "utf8"));
 	} catch (error) {
 		return fail("invalid_request", `${file} is not valid JSON: ${(error as Error).message}`);
 	}
-	const entries = (parsed as { mailboxes?: unknown } | null)?.mailboxes;
+	const settings = (parsed ?? {}) as { mailboxes?: unknown; driverDirs?: unknown; claude?: unknown };
+	const entries = settings.mailboxes;
 	if (!Array.isArray(entries)) return fail("invalid_request", `${file} must hold {"mailboxes": [...]}`);
+	const driverDirs = settings.driverDirs ?? [];
+	if (!Array.isArray(driverDirs) || !driverDirs.every(isAbsolutePath)) return fail("invalid_request", `${file}: driverDirs must be absolute paths`);
+	const claude = settings.claude ?? null;
+	if (claude !== null && !isAbsolutePath(claude)) return fail("invalid_request", `${file}: claude must be an absolute path`);
 	const mailboxes = entries.map(toMailbox);
 	const problem = mailboxes.find((entry): entry is string => typeof entry === "string");
 	return problem === undefined
-		? { ok: true, mailboxes: mailboxes.filter((entry): entry is Mailbox => typeof entry !== "string") }
+		? { ok: true, mailboxes: mailboxes.filter((entry): entry is Mailbox => typeof entry !== "string"), driverDirs, claude }
 		: fail("invalid_request", `${file}: ${problem}`);
 };
 
@@ -224,27 +236,31 @@ export const startRelogin = (
 	emails: string[],
 	{ spawn = nodeSpawn as Spawn }: { spawn?: Spawn } = {},
 ): Result<{ order: string[]; skipped: ReloginPlan["skipped"]; driver: { profile: string | null }; log: string }> => {
-	if (ctx.current === null) return fail("invalid_request", "Sign back in runs from a ccp profile window");
-	if (isRunning(readRunPid(ctx.home, ctx.current))) return fail("invalid_request", "Already signing back in");
-	const profile = findProfile(ctx.home, ctx.current);
-	if (!profile) return fail("not_found", `No profile named ${ctx.current}`);
-	const identity = readClaudeInChromeIdentity(viewOf(ctx.home, profile).userDataDir);
+	const browser = browserKey(ctx);
+	if (isRunning(readRunPid(ctx.home, browser))) return fail("invalid_request", "Already signing back in");
+	let browserDir = chromiumSupportDir(ctx.env);
+	if (ctx.current !== null) {
+		const profile = findProfile(ctx.home, ctx.current);
+		if (!profile) return fail("not_found", `No profile named ${ctx.current}`);
+		browserDir = viewOf(ctx.home, profile).userDataDir;
+	}
+	const identity = readClaudeInChromeIdentity(browserDir);
 	if (!identity) return fail("invalid_request", "Claude in Chrome in this profile is not signed in");
-	const candidates = driverCandidates(ctx.home, ctx.env);
+	const loaded = loadMailboxes(ctx.home);
+	if (!loaded.ok) return loaded;
+	const candidates = driverCandidates(ctx.home, ctx.env, loaded.driverDirs);
 	const configDir = findDriverConfigDir(identity.accountUuid, candidates.map((candidate) => candidate.dir));
 	if (configDir === null) {
 		return fail(
 			"invalid_request",
-			"No Claude Code config dir is signed in to this browser's Claude in Chrome account; set configDir on a profile or CCP_DRIVER_DIRS",
+			"No Claude Code config dir is signed in to this browser's Claude in Chrome account; list it in relogin.json's driverDirs, or set CCP_DRIVER_DIRS",
 		);
 	}
-	const loaded = loadMailboxes(ctx.home);
-	if (!loaded.ok) return loaded;
 	const plan = planRelogin(emails, loaded.mailboxes);
 	if (plan.order.length === 0) {
 		return fail("invalid_request", `Nothing to sign in: ${plan.skipped.map(({ email, reason }) => `${email} (${reason})`).join(", ")}`);
 	}
-	const claudeBin = ctx.env.CCP_CLAUDE || DEFAULT_CLAUDE;
+	const claudeBin = ctx.env.CCP_CLAUDE || loaded.claude || DEFAULT_CLAUDE;
 	if (!isExecutable(claudeBin)) return fail("invalid_request", `Claude Code not found at ${claudeBin}; set CCP_CLAUDE`);
 	const args = reloginArgs({
 		prompt: buildReloginPrompt({ deviceId: identity.bridgeDeviceId, accounts: plan.order }),
@@ -262,7 +278,7 @@ export const startRelogin = (
 		const child = spawn(claudeBin, args, { detached: true, stdio: ["ignore", log.fd, log.fd], env, cwd: reloginLogDir(ctx.home) });
 		child.on("error", (error) => process.stderr.write(`ccp: relogin failed to spawn: ${error.message}\n`));
 		child.unref();
-		if (child.pid !== undefined) writeFileSync(reloginPidFile(ctx.home, ctx.current), String(child.pid), { mode: 0o600 });
+		if (child.pid !== undefined) writeFileSync(reloginPidFile(ctx.home, browser), String(child.pid), { mode: 0o600 });
 	} finally {
 		closeSync(log.fd);
 	}
@@ -293,10 +309,12 @@ const signalGroup = (pid: number, signal: NodeJS.Signals | 0): boolean => {
 	}
 };
 
-const withRun = <T extends object>(ctx: Context, use: (pid: number | null, file: string) => T): Result<T> =>
-	ctx.current === null
-		? fail("invalid_request", "Sign back in runs from a ccp profile window")
-		: { ok: true, ...use(readRunPid(ctx.home, ctx.current), reloginPidFile(ctx.home, ctx.current)) };
+const browserKey = (ctx: Context): string => (ctx.current === null ? MAIN_BROWSER : `profile-${ctx.current}`);
+
+const withRun = <T extends object>(ctx: Context, use: (pid: number | null, file: string) => T): Result<T> => {
+	const browser = browserKey(ctx);
+	return { ok: true, ...use(readRunPid(ctx.home, browser), reloginPidFile(ctx.home, browser)) };
+};
 
 const isRunning = (pid: number | null): boolean => pid !== null && signalGroup(pid, 0);
 

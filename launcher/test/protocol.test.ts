@@ -20,9 +20,9 @@ test("a malformed request is invalid", async () => {
 });
 
 test("the native-host allowlist rejects add and remove", async () => {
-	assert.deepEqual(NATIVE_HOST_TYPES, ["ping", "profiles.list", "profiles.status", "profiles.launch", "relogin.start", "relogin.status", "relogin.stop"]);
+	assert.deepEqual(NATIVE_HOST_TYPES, ["ping", "profiles.list", "profiles.status", "accounts.report", "relogin.start", "relogin.status", "relogin.stop"]);
 	const ctx = tempContext();
-	for (const type of ["profiles.add", "profiles.remove", "profiles.env"]) {
+	for (const type of ["profiles.add", "profiles.remove", "profiles.env", "profiles.launch", "accounts.open", "accounts.openFor", "migrate"]) {
 		const result = await handleNative({ type, name: "a" }, ctx);
 		assert.equal(!result.ok && result.error.code, "unsupported", type);
 	}

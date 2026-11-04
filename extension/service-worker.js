@@ -1,8 +1,15 @@
 import { EXTERNAL_TYPES, NATIVE_TYPES, POPUP_TYPES, failure, isRequest } from "./lib/protocol.js";
 import { sendNative } from "./lib/native.js";
+import { bridgeConnected, connectBridge } from "./lib/bridge.js";
 import {
 	cancelRelogin,
 	checkAccounts,
+	checkForBridge,
+	exportLive,
+	importAccount,
+	listForBridge,
+	openAccount,
+	openFor,
 	expireRelogin,
 	forgetAccount,
 	listAccounts,
@@ -14,6 +21,7 @@ import {
 } from "./lib/jars.js";
 
 const CHECK_ALARM = "check-accounts";
+const BRIDGE_ALARM = "bridge";
 
 const withoutEmail = ({ email: _email, ...rest }) => rest;
 
@@ -34,7 +42,29 @@ const accountHandlers = {
 	"accounts.check": () => checkAccounts(),
 	"accounts.relogin": () => startRelogin(),
 	"accounts.reloginCancel": () => cancelRelogin(),
+	"accounts.open": async (msg, external) => {
+		const result = await openAccount(msg.label, msg.url ?? null);
+		return external ? withoutEmail(result) : result;
+	},
+	"bridge.status": () => ({ ok: true, connected: bridgeConnected() }),
 };
+
+const bridgeHandlers = {
+	ping: () => ({ ok: true }),
+	"accounts.list": () => listForBridge(),
+	"accounts.check": () => checkForBridge(),
+	"accounts.open": (msg) => openAccount(msg.label, msg.url ?? null),
+	"accounts.openFor": (msg) => openFor(msg.url),
+	"accounts.import": (msg) => importAccount(msg.label, msg.cookies),
+	"accounts.exportLive": () => exportLive(),
+};
+
+export const handleBridge = async (msg) => {
+	if (!isRequest(msg) || !Object.hasOwn(bridgeHandlers, msg.type)) return unsupported(msg?.type);
+	return bridgeHandlers[msg.type](msg);
+};
+
+const startBridge = () => connectBridge(handleBridge);
 
 const unsupported = (type) => failure("unsupported", `Unsupported request type: ${type}`);
 
@@ -68,9 +98,13 @@ const keepPopupWarm = async () => {
 		.catch(() => undefined);
 };
 
-const scheduleChecks = () => chrome.alarms.create(CHECK_ALARM, { periodInMinutes: 60 });
+const scheduleChecks = () => {
+	chrome.alarms.create(CHECK_ALARM, { periodInMinutes: 60 });
+	chrome.alarms.create(BRIDGE_ALARM, { periodInMinutes: 1 });
+};
 
 const onAlarm = async ({ name }) => {
+	if (name === BRIDGE_ALARM) return startBridge();
 	await expireRelogin();
 	if (name === CHECK_ALARM) await checkAccounts();
 };
@@ -78,11 +112,13 @@ const onAlarm = async ({ name }) => {
 const onBrowserStart = () => {
 	keepPopupWarm();
 	scheduleChecks();
+	startBridge();
 };
 
 chrome.runtime.onStartup.addListener(onBrowserStart);
 chrome.runtime.onInstalled.addListener(onBrowserStart);
 keepPopupWarm();
+startBridge();
 
 chrome.alarms.onAlarm.addListener((alarm) => onAlarm(alarm).catch(() => undefined));
 chrome.cookies.onChanged.addListener(onCookieChanged);

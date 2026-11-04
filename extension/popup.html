@@ -8,14 +8,14 @@
 	</head>
 	<body>
 		<section>
-			<h1>Profiles</h1>
+			<h1>Agents</h1>
+			<p id="bridge" class="helper">Checking whether ccp can reach this browser…</p>
 			<p id="profiles-error" class="error" hidden></p>
-			<ul id="profiles" class="rows"></ul>
 			<p class="status"><span id="status" hidden></span> <button id="reload" type="button" class="link">Reload extension</button></p>
 		</section>
 		<section>
-			<h1>claude.ai tab account</h1>
-			<p class="helper">Changes the claude.ai login in this profile's tabs. Claude in Chrome keeps its own login.</p>
+			<h1>claude.ai account</h1>
+			<p class="helper">One Chromium for every account: switching changes the claude.ai login in all of this browser's claude.ai tabs. Claude in Chrome keeps its own login.</p>
 			<form id="save-form" class="save">
 				<input id="label" name="label" type="text" placeholder="Label" maxlength="64" required />
 				<button type="submit">Save current</button>

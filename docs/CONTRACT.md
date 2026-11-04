@@ -4,6 +4,17 @@ Status: binding for all implementers. Scope cut: §6 (kanban) and `import-cswap`
 
 Original status line: If anything here turns out to be wrong when you test it, stop and report it. Do not work around it quietly.
 
+## 0a. v0.3: one Chromium for every account (supersedes the per-profile model where they disagree)
+
+The user keeps one main Chromium, with one login per site to maintain. Every Claude account lives there as a cookie jar (§5.3), and agents drive it through the launcher instead of starting a browser per account.
+
+- **No new browsers.** `ccp launch <account>` never starts an old per-account profile or a new `--user-data-dir`. It switches the main Chromium's claude.ai account through the extension and opens the URL there. If the main Chromium is not running it starts the binary plain (no flags), which opens the default profile, and waits up to 20 s for the extension to connect.
+- **The bridge (§4.11).** The extension keeps a native messaging port open (`chrome.runtime.connectNative`), which also keeps its service worker alive. The host started for that port listens on a unix socket in `CCP_HOME/run/` (0700): `main.sock` when the parent browser is the main Chromium (`current === null`), `profile-<name>.sock` when it is an old profile. The CLI sends one newline-terminated JSON request per connection and reads one JSON line back. Filesystem permissions are the authentication: only the user's own processes, an agent over ssh as that user included, can connect. No debugging port is opened.
+- **Limit, stated plainly.** Chromium cookies are per profile, not per tab, so one claude.ai account is active in the whole browser at a time. A switch reloads every claude.ai tab into the new account. Concurrent agents asking for different accounts take turns; the last switch wins. Per-tab accounts (rewriting the cookie header per tab) are not built: claude.ai's frontend reads non-HttpOnly cookies such as `lastActiveOrg` from the shared store, which would mix accounts within a tab.
+- **Claude in Chrome** keeps one login in the main Chromium, so only Claude Code on that account pairs with it. Agents on other accounts use `ccp` to switch and open, and other means (screen control) to see the page.
+- **Migration (§4.12).** `ccp migrate` reads each old profile's live session through that profile's own extension and imports it into the main Chromium. Cookies cross the bridge sockets and the `ccp` process's memory for this alone, and are never printed, logged or returned.
+- **Expiry (§5.3).** Each jar reports `sessionExpiresAt`, the `sessionKey` cookie's expiry; `accounts.json` in `CCP_HOME` carries every account's state for monitors.
+
 ## 0. The premise, corrected by the research
 
 - **What pairs Claude in Chrome with Claude Code is the claude.ai account, not the native host.** Claude Code 2.1.292 always uses the cloud bridge. Both sides join `wss://bridge.claudeusercontent.com/chrome/<accountUuid>`. The native host socket `/tmp/claude-mcp-browser-bridge-$USER/<pid>.sock` is not on the pairing path.
@@ -119,7 +130,10 @@ profiles/<name>/NativeMessagingHosts/engineer.cute.claude_profiles.json
 profiles/<name>/NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json  (copied, see 4.6)
 relogin.json                  mailboxes for "sign back in" (§4.10); written by the user, only read by ccp
 logs/relogin-<iso>.log        output of each "sign back in" run (dir 0700, file 0600)
-logs/relogin-<profile>.pid    process group of the profile's running "sign back in" driver (0600)
+logs/relogin-<browser>.pid    process group of the browser's running "sign back in" driver (0600); <browser> is main or profile-<name>
+run/main.sock                 bridge to the main Chromium's extension (§4.11), 0600, in a 0700 directory
+run/profile-<name>.sock       bridge to an old profile's extension, for migration only
+accounts.json                 {"schemaVersion":1,"updatedAt","accounts":[{name,label,email,status,checkedAt,sessionExpiresAt,state}]} (0600), written from the main browser's reports
 ```
 
 Set the `CCP_HOME` directory itself to mode 0700.
@@ -149,7 +163,11 @@ export type Result<T extends object> = ({ ok: true } & T) | Failure;
 | `profiles.status` | `{name}` | `{ok:true, profile: ProfileView}` |
 | `profiles.add` | `{name, email?, configDir?}` | `{ok:true, profile: ProfileView}` |
 | `profiles.remove` | `{name, keepData?: boolean}` | `{ok:true}` |
-| `profiles.launch` | `{name, url?}` | `{ok:true, profile: ProfileView, alreadyRunning: boolean, claudeInChromeVersion: string \| null}` |
+| `profiles.launch`, `accounts.open` | `{name, url?}` | `{ok:true, label, email, switched: boolean, reloadedTabs, tabId, account: AccountView, startedBrowser: boolean}` — switches the main Chromium, never starts an old profile |
+| `accounts.list` | – | `{ok:true, browser:{connected, updatedAt}, active: label \| null, accounts: AccountView[]}`; falls back to `accounts.json` with `connected:false` |
+| `accounts.status` | `{name?}` | as `accounts.list` after checking every jar, or `{…, account: AccountView}` for one |
+| `accounts.openFor` | `{url}` | `{ok:true, label, email, tabId, tried:[{label, result}], account}`; `url` must be `https://claude.ai/…` |
+| `migrate` | – | `{ok:true, profiles:[{profile, email, outcome, reason?, label?}], accounts: AccountView[], needSignIn: string[]}` |
 | `profiles.env` | `{name}` | `{ok:true, env: {CLAUDE_CONFIG_DIR: string}, unset: ["CLAUDE_CODE_OAUTH_TOKEN"]}` |
 | `relogin.start` | `{emails: string[]}` | `{ok:true, order: string[], skipped: [{email, reason}], driver: {profile: string \| null}, log: string}` (native host only, §4.10) |
 | `relogin.status` | `{}` | `{ok:true, running: boolean}` (native host only) |
@@ -163,10 +181,12 @@ Validation rules:
 - `configDir`, when present, must be an absolute path to an existing directory.
 - `profiles.remove` on a running profile returns `running`.
 - `profiles.env` on a profile without `configDir` returns `invalid_request`.
-- Over the native host, only `ping`, `profiles.list`, `profiles.status`, `profiles.launch`, `relogin.start`, `relogin.status` and `relogin.stop` are allowed. Any other type returns `unsupported`, so add and remove stay with the CLI and HTTP.
-- The `relogin.*` types exist only over the native host: `handle` (CLI and HTTP) answers them with `unsupported`, and `handleNative` dispatches them. `emails` must be 1–20 strings; they are lowercased and deduplicated, and any that are not plain addresses come back in `skipped` with reason "unsupported email address". All three need `current` (the profile the calling extension runs in); without one it returns `invalid_request` "Sign back in runs from a ccp profile window".
+- `AccountView` is `{name, label, email, status: "ok"|"revoked"|"unknown"|null, checkedAt, sessionExpiresAt, state: "signed-in"|"expiring"|"signed-out"|"unknown", active}`. `state` is `signed-out` when revoked or past `sessionExpiresAt`, `expiring` when ok and within 3 days of it. `name` is the label slugged to the profile-name pattern, with `-2`, `-3`… on collisions, so kanban's name check still passes. An account reference matches the label, then `name`, then email, then the label case-insensitively, then an old profile's email.
+- Over the native host, only `ping`, `profiles.list`, `profiles.status`, `accounts.report`, `relogin.start`, `relogin.status` and `relogin.stop` are allowed, plus the bridge messages of §4.11. Any other type returns `unsupported`, so add, remove, launch and migrate stay with the CLI and HTTP, and the extension never asks the launcher to call back into it.
+- `accounts.report {accounts}` writes `accounts.json` from at most 100 summaries, keeping only the `AccountView` fields, and only when `current === null`; from an old profile it is ignored.
+- The `relogin.*` types exist only over the native host: `handle` (CLI and HTTP) answers them with `unsupported`, and `handleNative` dispatches them. `emails` must be 1–20 strings; they are lowercased and deduplicated, and any that are not plain addresses come back in `skipped` with reason "unsupported email address". They run from the main Chromium (`current === null`, Claude in Chrome identity read from the default user-data-dir) or from an old profile.
 
-### 4.5 Launch (`chromium.ts`, `claudeExt.ts`, `running.ts`)
+### 4.5 Old-profile launch (`chromium.ts`, `claudeExt.ts`, `running.ts`), used only by `migrate`
 
 1. **Running detection** (`running.ts`):
    - `parseSingletonLock(target: string): {host: string; pid: number} | null` splits the `readlink` target on its last `-`. For example, `pilot-2353` gives `{host:"pilot", pid:2353}`.
@@ -271,7 +291,11 @@ export const currentProfileFromParent = (home: string, ppid = process.ppid): str
 | `POST /v1/profiles` `{name,email?,configDir?}` | `profiles.add` | 201 |
 | `GET /v1/profiles/:name` | `profiles.status` | 200 |
 | `DELETE /v1/profiles/:name` | `profiles.remove` (`?keepData=1`) | 200 |
-| `POST /v1/profiles/:name/launch` `{url?}` | `profiles.launch` | 200 |
+| `POST /v1/profiles/:name/launch` `{url?}` | `profiles.launch` (= `accounts.open`) | 200 |
+| `GET /v1/accounts` | `accounts.list` | 200 |
+| `GET /v1/accounts/:name` | `accounts.status` | 200 |
+| `POST /v1/accounts/:name/open` `{url?}` | `accounts.open` | 200 |
+| `POST /v1/open-for` `{url}` | `accounts.openFor` | 200 |
 | `GET /v1/profiles/:name/env` | `profiles.env` | 200 |
 
 **Error statuses:** the error body is the `Failure` shape.
@@ -283,7 +307,9 @@ export const currentProfileFromParent = (home: string, ppid = process.ppid): str
 | 404 | `not_found`, unknown route |
 | 405 | wrong method |
 | 409 | `already_exists`, `running` |
+| 409 | `session_expired` |
 | 422 | `chromium_not_found`, `unsupported` |
+| 503 | `browser_unavailable` |
 | 500 | `internal` |
 
 ### 4.8 CLI (`cli.ts`)
@@ -337,6 +363,21 @@ ccp native-host <origin>      # invoked by Chromium only
   - the `lsof` listing shows `127.0.0.1:47321` only.
 - A case-insensitive grep for the employer name across the repo finds nothing.
 
+### 4.11 Bridge (`bridge.ts`, `nativeHost.ts`)
+
+- The extension's port sends `{type:"bridge.attach"}` first; the host answers `{ok:true, attached:true, browser}` and serves its socket. A second attach on the same port is a no-op.
+- Each socket request `{type, ...params, timeoutMs?}` is checked against the socket's allowlist, then forwarded as `{type:"bridge.request", id, request}`; the extension answers `{type:"bridge.reply", id, response}`, which the host writes back. Requests time out after `timeoutMs` (default 30 s, at most 10 min).
+- `main.sock` allows `ping`, `accounts.list`, `accounts.check`, `accounts.open {label, url}`, `accounts.openFor {url}` and `accounts.import {label, email, cookies}`. `profile-<name>.sock` allows `ping` and `accounts.exportLive`. Anything else is `unsupported` without reaching the browser.
+- The extension may also send `accounts.report` on the port, handled as in §4.4.
+- When the port closes the host fails pending requests with `browser_unavailable`, removes its socket and exits. A client that cannot connect gets `browser_unavailable`.
+- Requests over 256 KiB are refused. Responses may carry cookies only for `accounts.exportLive`; the launcher never prints them.
+
+### 4.12 Migrate (`accounts.ts`)
+
+- Needs the main bridge. For each old profile, in `profiles.json` order: if it is not running, start it with `--headless=new` added; wait up to 30 s for `profile-<name>.sock` to answer `ping`; call `accounts.exportLive`; pass `{label: profile.email ?? email, email, cookies}` to the main browser's `accounts.import`; stop the browser if it started it.
+- Outcomes: `imported`; `already-signed-in` (the main Chromium's jar for that email still works, so it is kept); `signed-out` (`session_expired` from either side); `unreachable` (did not start, extension did not connect, or claude.ai could not be reached), each with a `reason`.
+- It never deletes an old profile or its data, never logs out, and never prints cookies.
+
 ### 4.10 Sign back in (`claudeInChrome.ts`, `relogin.ts`)
 
 A saved claude.ai account whose session was revoked can only be restored by signing in again. Claude in Chrome cannot be driven by another extension, so the launcher starts Claude Code (`claude -p --chrome`) against this browser's Claude in Chrome and has it follow each account's emailed magic link.
@@ -344,7 +385,8 @@ A saved claude.ai account whose session was revoked can only be restored by sign
 **Driver identity** (`claudeInChrome.ts`)
 
 - `readClaudeInChromeIdentity(userDataDir): {accountUuid, bridgeDeviceId} | null` reads the raw bytes of every `*.ldb` and then every `*.log` (best effort; compressed data simply doesn't match) in `<udd>/Default/Local Extension Settings/fcoeoabgfenejglbffodgkkbkcdhcgfn/` as latin1, each kind in file-name order, so the live log wins over tables that LevelDB may number higher, and takes the last UUID-shaped JSON string after each key (`parseIdentity`). Neither value is logged or returned to the extension.
-- `findDriverConfigDir(accountUuid, configDirs)` returns the first dir whose `<dir>/.claude.json` has `oauthAccount.accountUuid` equal to it. Candidates are every profile's `configDir`, then every subdirectory of each `CCP_DRIVER_DIRS` entry.
+- `findDriverConfigDir(accountUuid, configDirs)` returns the first dir whose `<dir>/.claude.json` has `oauthAccount.accountUuid` equal to it. Candidates are every profile's `configDir`, then every subdirectory of each `CCP_DRIVER_DIRS` entry, then each of `relogin.json`'s `driverDirs`.
+- The browser is the main Chromium (identity from its default user-data-dir) when `current` is null, else the old profile.
 
 **Mailboxes** (`CCP_HOME/relogin.json`)
 
@@ -354,11 +396,12 @@ A saved claude.ai account whose session was revoked can only be restored by sign
 
 - `match` starting with `@` matches the email's domain or any subdomain of it, case-insensitively; anything else is an exact email. The first matching entry wins.
 - `url` must be https with a hostname of only `[a-z0-9.-]`; `{email}` becomes `encodeURIComponent(email)`. `priority` (default 0) orders accounts, higher first; ties keep request order.
+- Optional `driverDirs` (absolute paths, each a Claude Code config dir) and `claude` (absolute path, used when `CCP_CLAUDE` is unset), because the main Chromium starts the launcher with its own environment.
 - A missing file means no mailboxes. An invalid file returns `invalid_request` naming the problem. Accounts with no mailbox are returned in `skipped` with reason "no mailbox in relogin.json"; if none remain, `invalid_request`.
 
 **The run**
 
-- Binary: `CCP_CLAUDE` [`/opt/homebrew/bin/claude`]; not executable → `invalid_request`.
+- Binary: `CCP_CLAUDE`, else `relogin.json`'s `claude` [`/opt/homebrew/bin/claude`]; not executable → `invalid_request`.
 - argv: `-p <prompt> --chrome --restricted --strict-mcp-config --tools ToolSearch --permission-mode dontAsk --no-session-persistence --max-budget-usd 5 --output-format json --allowedTools=<the claude-in-chrome tools>,ClaudeInChromeDomain(claude.ai),ClaudeInChromeDomain(<each mailbox host>)`. The tools are `tabs_context_mcp`, `tabs_create_mcp`, `tabs_close_mcp`, `navigate`, `read_page`, `find`, `get_page_text`, `computer`, `form_input`, `select_browser` and `list_connected_browsers`; never `javascript_tool`, since the agent reads untrusted mail. `dontAsk` overrides a config dir's `bypassPermissions` default, and `--restricted` ignores that dir's user settings (permissions and hooks).
 - env is an allowlist, nothing else from the launcher's environment: `HOME`, `USER`, `LOGNAME`, `PATH=<dirname(claude)>:/usr/bin:/bin:/usr/sbin:/sbin`, `CLAUDE_CONFIG_DIR=<driver dir>`, `CLAUDE_CHROME_PAIRED_DEVICE_ID=<bridgeDeviceId>`. Never `CLAUDE_CODE_OAUTH_TOKEN`.
 - The prompt selects the browser by device id first, works only in its own new tab group, and per account: opens `/login`, asks for an email link, finds the newest sign-in email from Anthropic from the last 15 minutes in the mailbox (reloading every 20 seconds for up to 4 minutes), requires the link to start with `https://claude.ai/magic-link#` and its base64 part to decode to that email, and opens it in the same tab. It stops on any CAPTCHA, Cloudflare challenge or 6-digit-code prompt, never logs out, never sends or changes mail, and closes its tabs at the end.
@@ -373,10 +416,10 @@ A saved claude.ai account whose session was revoked can only be restored by sign
 {
   "manifest_version": 3,
   "name": "Claude Profiles",
-  "version": "0.2.0",
-  "description": "Launch Chromium profiles per Claude account and switch claude.ai tab accounts.",
+  "version": "0.3.0",
+  "description": "Keep every Claude account in one Chromium and let agents switch and open claude.ai sessions.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApsOB8/9r26rcuLGR+VHgUV6ZnwJueFmlMycFrCJkxny7BwsnxFty2Niy/hvaPzESDb/o+8KjsbxOlQlblje8HZnm6eTm60PDGqJ0xHjRjNF5L/M8OG5dh7rWz/MAp3BUpq5Nfa6YL4ukOxieWPOeVksWRHUiNa8P7eMQAC0sGyIBEq2GMVM4GCL2bpCOUoUN6NsCV10Ax8wvM7KFJX2NNuXBqUx2Fd0EqyyTrTFbRjsB4RRJcWayumYTuWxqfaNNqVi0s8YC/nPZphux2mIOUU22exiPrye/m/vzNGgA4RwId2/Qr1n7vzkVIKNzscn5jS+V9WHBmjtZCKUefwmb/QIDAQAB",
-  "permissions": ["nativeMessaging", "cookies", "storage", "offscreen", "declarativeNetRequestWithHostAccess", "alarms"],
+  "permissions": ["nativeMessaging", "cookies", "storage", "offscreen", "declarativeNetRequestWithHostAccess", "alarms", "scripting"],
   "host_permissions": ["https://claude.ai/*", "https://*.claude.ai/*"],
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Claude Profiles" },
@@ -396,7 +439,8 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 |---|---|---|---|
 | `ping` | native host (`lib/native.js` → `chrome.runtime.sendNativeMessage(HOST_NAME, msg)`) | yes | yes |
 | `profiles.list` | native host | yes | yes |
-| `profiles.launch` `{name,url?}` | native host | yes | yes |
+| `accounts.open` `{label, url?}` | jars → switch if not active, open `url` (or focus a claude.ai tab) → `{ok:true, label, email, switched, reloadedTabs, tabId}` (external: no `email`) | yes | yes |
+| `bridge.status` | `{ok:true, connected}` | yes | no |
 | `accounts.list` | `lib/jars.js` → `{ok:true, accounts:[{label, savedAt, cookieCount, email, status, checkedAt}]}` (external: no `email`) | yes | yes |
 | `accounts.check` | jars → probes every jar, same body as `accounts.list` | yes | no |
 | `accounts.relogin` | jars → native `relogin.start` → `{ok:true, started, order?, skipped?, driver?, message?}` | yes | no |
@@ -457,19 +501,25 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 - While a relogin is active, each new `sessionKey` cookie waits 10 seconds, so claude.ai's magic-link page finishes setting its cookies, then runs a live check, retrying up to 3 times 10 seconds apart while it can't reach claude.ai. An ok session whose email is pending is saved into that jar (or a new jar labelled with the email) and removed from `pending`, and cookies are cleared for the next account (or it finishes).
 - It finishes when `pending` is empty, when the driver has exited, on cancel, or after the larger of 20 minutes and 6 minutes per account in `accounts` since `startedAt`; cancel and expiry first call native `relogin.stop`. Then the alarm is cleared, the `restoreLabel` jar is restored, claude.ai tabs reload, the state is deleted and the jars are checked again.
 
+**One browser, every account (v0.3)**
+
+- `sessionExpiresAt(cookies)`: the saved `sessionKey`'s `expirationDate` as ISO, or null. `toAccountSummary` includes it; a jar past it counts as signed out for the badge.
+- Every `writeJars` sends `accounts.report` with `toReport` summaries (label, email, status, checkedAt, sessionExpiresAt) over the bridge port when connected.
+- Bridge handlers (`service-worker.js` `handleBridge`): `ping`; `accounts.list` and `accounts.check` → summaries plus `active` (the label whose email matches the live session); `accounts.open`; `accounts.openFor`; `accounts.import`; `accounts.exportLive`. Each runs in the jars' serial queue.
+- `accounts.openFor {url}`: `url` must be https on claude.ai. Order: the active account, then every other jar not known revoked, by label. For each it switches (except for the active one, first), loads `url` in one tab of its own, and reads the page text with `chrome.scripting.executeScript` until `classifyPage` decides: `signed-out` on `/login` or `/magic-link`, `not-found` on "couldn't be found" and similar, `found` once 8 s have passed since load with neither (at most 25 s). On `found` it focuses the tab and returns; if none, it closes its tab, switches back to the starting account and returns `not_found` naming each result.
+- `accounts.exportLive`: the live claude.ai account cookies (no Cloudflare cookies) and email, only while the live check is ok; `session_expired` when revoked.
+- `accounts.import {label, cookies}`: at most 200 cookies on claude.ai, Cloudflare ones dropped, a `sessionKey` required. The jar is probed (§5.3 session checks) without touching the live cookies; revoked → `session_expired`. If a jar for that email already passes a probe it is kept (`imported:false`); otherwise the session is saved into that jar, or a new one labelled with the given label (or the email made label-safe).
+
 ### 5.4 Popup
 
 `popup.html`, `popup.js` and `popup.css`, at a 320 px width.
 
-- **Profiles section:**
-  - one row per profile, showing name, email, a running dot and a "Launch" button (or "Focus" when it is running);
-  - the row for `current` is marked "this window";
-  - an error from the native host shows inline with the message (e.g. "Run: ccp install-host").
+- **Agents section** (v0.3, replaces the Profiles section): one line saying whether `ccp` can reach this browser (`bridge.status`), the launcher's ping time, and an error from the native host inline (e.g. "Run: ccp install-host").
 - **claude.ai tab account section:**
   - a label input with a "Save current" button;
   - a list of saved jars, each with "Switch" and "Forget" buttons;
-  - fixed helper text: "Changes the claude.ai login in this profile's tabs. Claude in Chrome keeps its own login."
-  - each jar shows a status chip: "Signed in", "Signed out" (red), or "Unchecked" / "Couldn't check" (muted), titled with the check time; the cached list renders first, then `accounts.check` re-renders it;
+  - fixed helper text: "One Chromium for every account: switching changes the claude.ai login in all of this browser's claude.ai tabs. Claude in Chrome keeps its own login."
+  - each jar shows a status chip: "Signed in", "Expires soon" (amber, within 3 days of `sessionExpiresAt`), "Signed out" (red, revoked or expired), or "Unchecked" / "Couldn't check" (muted), titled with the check and expiry times; the cached list renders first, then `accounts.check` re-renders it;
   - "Sign back in to signed-out accounts" appears when at least one jar is signed out and no relogin is active. While one is active the popup shows "Signing back in: <emails> — Claude is driving this browser" with "Cancel"; after starting it lists skipped emails with reasons and the driver.
 
 ### 5.5 Extension acceptance
@@ -546,7 +596,8 @@ Use `node:test` and `node:assert/strict`. Each test gets a temp `CCP_HOME` from 
   - garbage input gives null;
   - `isRunning` against a real symlink in a temp dir, with an injected `alive`: true/false, plus a host mismatch;
   - a missing lock gives not running.
-- **chromium:** the exact `buildLaunchArgs` output, with and without `url` and `extraArgs`. Also, `profiles.launch` with `url: "--foo"` and `url: "file:///etc/passwd"` gives `invalid_request`.
+- **chromium:** the exact `buildLaunchArgs` output, with and without `url` and `extraArgs`. Also, `profiles.launch` with `url: "--foo"` and `url: "file:///etc/passwd"` gives `invalid_request`, and never starts an old profile.
+- **bridge:** a round trip over a socket with mode 0600 in a 0700 directory, allowlist refusal before the browser, timeout, `browser_unavailable` once closed, `bridge.attach` choosing `main.sock` or `profile-<name>.sock`, account state and expiry, names and resolution, `accounts.json` keeping only summary fields, `list` falling back to it, `launch` and `open-for` requests, and `migrate` outcomes with no cookie value in its result.
 - **claudeExt:**
   - a fake source with `1.0.9_0`, `1.0.102_0` and `1.0.102_1` picks `1.0.102_1`;
   - a directory without a manifest is ignored;
@@ -573,19 +624,22 @@ Use `node:test` and `node:assert/strict`. Each test gets a temp `CCP_HOME` from 
 
 ### 7.2 e2e smoke: `tests/e2e/smoke.ts`
 
-Run it with node directly; it exits non-zero on failure. It uses a temp `CCP_HOME` and `CCP_EXTRA_ARGS="--headless=new --remote-debugging-port=0"`, and never touches the user's Chromium profile.
+Run it with node directly; it exits non-zero on failure. It uses a temp `CCP_HOME`, a temp `HOME`, `CCP_NODE` set to the running node, and `CCP_EXTRA_ARGS="--headless=new --remote-debugging-port=0 --use-mock-keychain $CCP_E2E_EXTRA_ARGS"`, and never touches the user's Chromium profile. Off a Mac, set `CCP_CHROMIUM` and `CCP_E2E_EXTRA_ARGS=--no-sandbox`.
 
-1. `bin/ccp add smoke --email smoke@example.com --json` gives `ok`.
-2. `bin/ccp launch smoke --json` gives `ok` with `running: true`.
-3. Poll for `<udd>/DevToolsActivePort` for up to 15 s and read the port from its first line.
-4. `GET http://127.0.0.1:<port>/json/list` must contain the service worker targets `chrome-extension://bkgjdpakjigjgdggfcckikppbjjcdkim/service-worker.js` and, when `claudeInChromeVersion` was non-null, one for `fcoeoabgfenejglbffodgkkbkcdhcgfn`.
-5. Open the global `WebSocket` to our worker's `webSocketDebuggerUrl` and send `Runtime.evaluate` with `awaitPromise: true` and the expression `chrome.runtime.sendNativeMessage("engineer.cute.claude_profiles", {type: "profiles.list"})`. Assert `ok === true` and `current === "smoke"`. This proves the per-profile host manifest, the wrapper and the parent-process lookup work.
-6. Evaluate the dispatcher with `{type: "accounts.list"}` and assert `{ok: true, accounts: []}`. Do not log in and do not set real cookies.
-7. Kill the pid from `SingletonLock` with SIGTERM, wait up to 5 s, and check that `ccp status smoke --json` reports `running: false` (the stale lock is handled).
-8. In a `finally` block, kill the process if it is still alive and remove the temp dir.
+1. `bin/ccp add smoke --email smoke@example.com --json` gives `ok` (an old profile).
+2. `bin/ccp install-host --chromium-default`, then start `CCP_CHROMIUM` itself on the temp home's default user-data-dir with `--load-extension=extension/`, standing in for the main Chromium.
+3. Poll for its `DevToolsActivePort`, find our service worker target, and evaluate `chrome.runtime.sendNativeMessage(HOST_NAME, {type: "profiles.list"})` in it: `ok` with `current === null`.
+4. `ccp list --json` reaches the browser (`browser.connected`), with no accounts, no profiles and `legacyProfiles: ["smoke"]`.
+5. `ccp launch nobody` and `ccp launch smoke` give `not_found`, and the old profile is never started.
+6. `ccp open-for https://example.com/` gives `invalid_request`.
+7. `ccp migrate --json` lists `smoke` as `signed-out` or `unreachable` with a reason, and the headless profile it started has stopped.
+8. The dispatcher's `accounts.list` is `{ok: true, accounts: []}`. Do not log in and do not set real cookies.
+9. SIGTERM the browser; `ccp list --json` then reports `browser.connected: false`.
+10. In a `finally` block, kill anything still alive and remove the temp dir.
 
 ## 8. Security constraints (all components)
 
+- **Bridge sockets:** unix sockets only, 0600 in a 0700 directory, per-socket allowlists, no TCP and no debugging port. Cookies cross them only for `accounts.exportLive` → `accounts.import` during `migrate`.
 - **Network exposure:** the HTTP server binds `127.0.0.1` only, requires a bearer token (0600 file, timing-safe compare), checks the `Host` header, and sends no CORS headers.
 - **Native host callers:** only our extension's origin is listed in `allowed_origins`. The host also checks `argv[1]`, and it does not allow add or remove. `relogin.start`, `relogin.status` and `relogin.stop` are native-only and are never exposed to external pages: the extension calls it only from its own popup flow.
 - **Secrets:** cookie values, the token, OAuth tokens and `.claude.json` contents are never logged or returned. From `.claude.json` the launcher reads exactly one field, `oauthAccount.accountUuid`, to find the driver config dir for sign back in (§4.10), and compares it without logging or returning it. It never reads the credentials in config dirs.

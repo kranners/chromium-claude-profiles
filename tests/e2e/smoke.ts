@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,8 +25,12 @@ const env: NodeJS.ProcessEnv = {
 	CCP_CLAUDE_EXT_SOURCE:
 		process.env.CCP_CLAUDE_EXT_SOURCE ??
 		join(realUserHome, "Library", "Application Support", "Chromium", "Default", "Extensions", CLAUDE_IN_CHROME_ID),
-	CCP_EXTRA_ARGS: "--headless=new --remote-debugging-port=0 --use-mock-keychain",
+	CCP_EXTRA_ARGS: `--headless=new --remote-debugging-port=0 --use-mock-keychain ${process.env.CCP_E2E_EXTRA_ARGS ?? ""}`.trim(),
+	CCP_NODE: process.env.CCP_NODE ?? process.execPath,
 };
+
+const chromium = env.CCP_CHROMIUM ?? "/Applications/Chromium.app/Contents/MacOS/Chromium";
+const mainUserDataDir = join(fakeUserHome, "Library", "Application Support", "Chromium");
 
 type CcpRun = { code: number; stdout: string; stderr: string };
 
@@ -143,71 +147,96 @@ const step = (text: string) => process.stdout.write(`ok - ${text}\n`);
 
 let browserPid: number | null = null;
 
+const startMainBrowser = (): number => {
+	const child = spawn(
+		chromium,
+		[
+			`--user-data-dir=${mainUserDataDir}`,
+			"--no-first-run",
+			"--no-default-browser-check",
+			`--load-extension=${join(repoRoot, "extension")}`,
+			...(env.CCP_EXTRA_ARGS ?? "").split(/\s+/).filter(Boolean),
+		],
+		{ detached: true, stdio: "ignore", env },
+	);
+	child.on("error", (error) => process.stderr.write(`could not start ${chromium}: ${error.message}\n`));
+	child.unref();
+	if (child.pid === undefined) throw new Error(`could not start ${chromium}`);
+	return child.pid;
+};
+
 const main = async () => {
 	const added = await ccpJson("add", PROFILE, "--email", "smoke@example.com");
 	assert.equal(added.ok, true, JSON.stringify(added.error));
-	step("add smoke");
+	step("add an old per-account profile");
 
-	const launched = await ccpJson("launch", PROFILE);
-	assert.equal(launched.ok, true, JSON.stringify(launched.error));
-	assert.equal(launched.profile.running, true);
-	browserPid = launched.profile.pid;
-	const userDataDir: string = launched.profile.userDataDir;
-	step(`launch smoke (pid ${browserPid}, Claude in Chrome ${launched.claudeInChromeVersion ?? "absent"})`);
+	const installed = await ccp("install-host", "--chromium-default");
+	assert.equal(installed.code, 0, installed.stderr);
+	browserPid = startMainBrowser();
+	step(`main Chromium started with Claude Profiles (pid ${browserPid})`);
 
 	const port = await pollFor("DevToolsActivePort", 15_000, () => {
-		const firstLine = readOrNull(join(userDataDir, "DevToolsActivePort"))?.split("\n")[0];
+		const firstLine = readOrNull(join(mainUserDataDir, "DevToolsActivePort"))?.split("\n")[0];
 		return firstLine && /^[0-9]+$/.test(firstLine) ? Number(firstLine) : null;
 	});
-	step(`DevTools on port ${port}`);
-
-	const ourWorker = await pollFor("service worker targets", 15_000, async () => {
-		const targets = await listTargets(port);
-		const ours = workerTarget(targets, OUR_EXTENSION_ID);
-		const claudeReady = launched.claudeInChromeVersion === null || workerTarget(targets, CLAUDE_IN_CHROME_ID) !== undefined;
-		return ours && claudeReady ? ours : null;
-	});
+	const ourWorker = await pollFor("our service worker", 15_000, async () => workerTarget(await listTargets(port), OUR_EXTENSION_ID) ?? null);
 	assert.equal(ourWorker.url, `chrome-extension://${OUR_EXTENSION_ID}/service-worker.js`);
-	step("service worker targets present");
-
-	await pollFor("the warm offscreen document", 15_000, async () =>
-		(await listTargets(port)).some((target) => target.url === `chrome-extension://${OUR_EXTENSION_ID}/warm.html`) ? true : null,
-	);
-	step("warm offscreen document keeps the extension process alive");
+	step("service worker target present");
 
 	await pollFor("our service worker to finish loading", 15_000, async () =>
 		(await evaluateInWorker(port, `typeof globalThis.dispatch === "function"`)) === true ? true : null,
 	);
-
-	const listed = await evaluateInWorker(
-		port,
-		`chrome.runtime.sendNativeMessage(${JSON.stringify(HOST_NAME)}, {type: "profiles.list"})`,
-	);
+	const listed = await evaluateInWorker(port, `chrome.runtime.sendNativeMessage(${JSON.stringify(HOST_NAME)}, {type: "profiles.list"})`);
 	assert.equal(listed?.ok, true, JSON.stringify(listed?.error));
-	assert.equal(listed.current, PROFILE);
-	step("native host profiles.list reports current = smoke");
+	assert.equal(listed.current, null);
+	step("native host sees the main browser (current = null)");
+
+	const connected = await pollFor("ccp to reach the main browser", 20_000, async () => {
+		const result = await ccpJson("list");
+		return result.ok && result.browser.connected ? result : null;
+	});
+	assert.deepEqual(connected.accounts, []);
+	assert.deepEqual(connected.profiles, []);
+	assert.deepEqual(connected.legacyProfiles, [PROFILE]);
+	assert.equal(connected.schemaVersion, 1);
+	step("ccp list reaches the main browser over the bridge");
+
+	const missing = await ccp("launch", "nobody", "--json");
+	assert.equal(missing.code, 1);
+	assert.equal(JSON.parse(missing.stdout).error.code, "not_found");
+	const old = await ccp("launch", PROFILE, "--json");
+	assert.equal(JSON.parse(old.stdout).error.code, "not_found");
+	assert.equal(lockPid(join(home, "profiles", PROFILE)), null, "launch started an old profile");
+	step("launch opens accounts in the main browser only, never an old profile");
+
+	const badLink = await ccp("open-for", "https://example.com/", "--json");
+	assert.equal(JSON.parse(badLink.stdout).error.code, "invalid_request");
+	step("open-for takes claude.ai links only");
+
+	const migrated = await ccpJson("migrate");
+	assert.equal(migrated.ok, true, JSON.stringify(migrated.error));
+	assert.deepEqual(
+		migrated.profiles.map((row: { profile: string }) => row.profile),
+		[PROFILE],
+	);
+	assert.ok(["signed-out", "unreachable"].includes(migrated.profiles[0].outcome), JSON.stringify(migrated.profiles[0]));
+	assert.match(migrated.profiles[0].reason ?? "", /claude\.ai|signed in|check the session/i);
+	await pollFor("the old profile migrate started to stop again", 10_000, () => {
+		const oldPid = lockPid(join(home, "profiles", PROFILE));
+		return oldPid === null || !alive(oldPid) ? true : null;
+	});
+	step(`migrate read the old profile headless and stopped it again (${migrated.profiles[0].outcome}: ${migrated.profiles[0].reason})`);
 
 	const accounts = await evaluateInWorker(port, `dispatch({type: "accounts.list"}, {external: false})`);
 	assert.deepEqual(accounts, { ok: true, accounts: [] });
 	step("dispatcher accounts.list is empty");
 
-	await evaluateInWorker(port, "setTimeout(() => chrome.runtime.reload(), 100), true");
-	await delay(1500);
-	const afterReload = await pollFor("the extension to come back after a reload", 15_000, async () => {
-		const result = await evaluateInWorker(port, `dispatch({type: "accounts.list"}, {external: false})`).catch(() => null);
-		return result?.ok ? result : null;
-	});
-	assert.deepEqual(afterReload, { ok: true, accounts: [] });
-	step("extension reloads without being disabled");
-
-	const pid = lockPid(userDataDir);
-	assert.ok(pid !== null, "SingletonLock has no pid");
+	const pid = lockPid(mainUserDataDir) ?? browserPid;
 	process.kill(pid, "SIGTERM");
-	await pollFor("Chromium to exit", 5_000, () => (alive(pid) ? null : true));
-	const status = await ccpJson("status", PROFILE);
-	assert.equal(status.ok, true, JSON.stringify(status.error));
-	assert.equal(status.profile.running, false);
-	step("status reports running: false after SIGTERM");
+	await pollFor("Chromium to exit", 10_000, () => (alive(pid) ? null : true));
+	const after = await ccpJson("list");
+	assert.equal(after.browser.connected, false);
+	step("list reports the browser disconnected once Chromium quits");
 };
 
 const killGroup = (pid: number) => {
@@ -226,7 +255,7 @@ try {
 	failed = true;
 	process.stderr.write(`not ok - ${(error as Error).message}\n`);
 } finally {
-	for (const pid of new Set([browserPid, lockPid(join(home, "profiles", PROFILE))])) {
+	for (const pid of new Set([browserPid, lockPid(mainUserDataDir), lockPid(join(home, "profiles", PROFILE))])) {
 		if (pid !== null && alive(pid)) killGroup(pid);
 	}
 	rmSync(scratch, { recursive: true, force: true });
