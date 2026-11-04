@@ -112,6 +112,11 @@ h1 {
 	color: var(--running);
 }
 
+.chip.expiring {
+	border-color: #b06d00;
+	color: #b06d00;
+}
+
 .chip.revoked {
 	border-color: var(--error);
 	color: var(--error);

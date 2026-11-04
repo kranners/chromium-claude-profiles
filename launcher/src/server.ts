@@ -14,6 +14,10 @@ export type Route =
 	| { kind: "remove"; name: string }
 	| { kind: "launch"; name: string }
 	| { kind: "env"; name: string }
+	| { kind: "accounts" }
+	| { kind: "account"; name: string }
+	| { kind: "open"; name: string }
+	| { kind: "open-for" }
 	| { kind: "not-found" }
 	| { kind: "method-not-allowed" };
 
@@ -29,6 +33,8 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
 	chromium_not_found: 422,
 	unsupported: 422,
 	native_host_unavailable: 500,
+	browser_unavailable: 503,
+	session_expired: 409,
 	internal: 500,
 };
 
@@ -45,6 +51,14 @@ const byMethod = (method: string, routes: Record<string, Route>): Route =>
 
 export const matchRoute = (method: string, pathname: string): Route => {
 	if (pathname === "/v1/health") return byMethod(method, { GET: { kind: "health" } });
+	if (pathname === "/v1/accounts") return byMethod(method, { GET: { kind: "accounts" } });
+	if (pathname === "/v1/open-for") return byMethod(method, { POST: { kind: "open-for" } });
+	const account = /^\/v1\/accounts\/([^/]+)(?:\/(open))?$/.exec(pathname);
+	if (account) {
+		const name = decodeSegment(account[1]);
+		if (name === null) return { kind: "not-found" };
+		return account[2] === "open" ? byMethod(method, { POST: { kind: "open", name } }) : byMethod(method, { GET: { kind: "account", name } });
+	}
 	if (pathname === "/v1/profiles") return byMethod(method, { GET: { kind: "list" }, POST: { kind: "add" } });
 	const match = /^\/v1\/profiles\/([^/]+)(?:\/(launch|env))?$/.exec(pathname);
 	const name = match ? decodeSegment(match[1]) : null;
@@ -106,6 +120,14 @@ const requestFor = (route: Route, body: Record<string, unknown>, url: URL): obje
 			return { type: "profiles.launch", name: route.name, url: body.url };
 		case "env":
 			return { type: "profiles.env", name: route.name };
+		case "accounts":
+			return { type: "accounts.list" };
+		case "account":
+			return { type: "accounts.status", name: route.name };
+		case "open":
+			return { type: "accounts.open", name: route.name, url: body.url };
+		case "open-for":
+			return { type: "accounts.openFor", url: body.url };
 		default:
 			return null;
 	}

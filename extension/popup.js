@@ -1,8 +1,6 @@
 import { listAccounts, reloginStatus } from "./lib/jars.js";
 import { sendNative } from "./lib/native.js";
 
-const PROFILES_CACHE_KEY = "profilesCache";
-
 const byId = (id) => document.getElementById(id);
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -34,20 +32,8 @@ const button = (label, onClick) => {
 	return node;
 };
 
-const profileRow = (profile, current) =>
-	element("li", { className: "row" }, [
-		element("span", { className: profile.running ? "dot running" : "dot", title: profile.running ? "Running" : "Stopped" }),
-		element("span", { className: "identity" }, [
-			element("span", { className: "name" }, [
-				profile.name,
-				...(profile.name === current ? [element("span", { className: "this-window", textContent: "this window" })] : []),
-			]),
-			element("span", { className: "email", textContent: profile.email ?? "" }),
-		]),
-		button(profile.running ? "Focus" : "Launch", () => launchProfile(profile.name)),
-	]);
-
 const STATUS_CHIPS = {
+	expiring: { text: "Expires soon", className: "chip expiring" },
 	ok: { text: "Signed in", className: "chip ok" },
 	revoked: { text: "Signed out", className: "chip revoked" },
 	unknown: { text: "Couldn't check", className: "chip" },
@@ -55,13 +41,20 @@ const STATUS_CHIPS = {
 
 const UNCHECKED_CHIP = { text: "Unchecked", className: "chip" };
 
-const statusChip = ({ status, checkedAt }) => {
-	const chip = STATUS_CHIPS[status] ?? UNCHECKED_CHIP;
-	return element("span", {
-		className: chip.className,
-		textContent: chip.text,
-		title: checkedAt ? `Checked ${new Date(checkedAt).toLocaleString()}` : "Not checked yet",
-	});
+const EXPIRING_MS = 3 * 24 * 60 * 60 * 1000;
+
+const chipKey = ({ status, sessionExpiresAt }) => {
+	const expiresAt = sessionExpiresAt ? Date.parse(sessionExpiresAt) : null;
+	if (expiresAt !== null && expiresAt <= Date.now()) return "revoked";
+	if (status === "ok" && expiresAt !== null && expiresAt - Date.now() < EXPIRING_MS) return "expiring";
+	return status;
+};
+
+const statusChip = (account) => {
+	const chip = STATUS_CHIPS[chipKey(account)] ?? UNCHECKED_CHIP;
+	const checked = account.checkedAt ? `Checked ${new Date(account.checkedAt).toLocaleString()}` : "Not checked yet";
+	const expires = account.sessionExpiresAt ? `; session expires ${new Date(account.sessionExpiresAt).toLocaleString()}` : "";
+	return element("span", { className: chip.className, textContent: chip.text, title: `${checked}${expires}` });
 };
 
 const accountRow = (account) =>
@@ -79,32 +72,21 @@ const accountRow = (account) =>
 
 const emptyRow = (text) => element("li", { className: "empty", textContent: text });
 
-const showProfiles = ({ profiles, current }) =>
-	byId("profiles").replaceChildren(
-		...(profiles.length
-			? profiles.map((profile) => profileRow(profile, current))
-			: [emptyRow("No profiles. Run: ccp add <name>")]),
-	);
-
-const showCachedProfiles = async () => {
-	const cached = (await chrome.storage.local.get(PROFILES_CACHE_KEY))[PROFILES_CACHE_KEY];
-	if (cached) showProfiles(cached);
-};
-
-const refreshProfiles = async () => {
+const showBridge = async () => {
 	const startedAt = performance.now();
-	const result = await sendNative({ type: "profiles.list" });
+	const result = await sendNative({ type: "ping" });
 	const elapsed = Math.round(performance.now() - startedAt);
 	if (!result.ok) {
 		showMessage("profiles-error", result.error.message);
 		showMessage("status", null);
-		return;
+	} else {
+		showMessage("profiles-error", null);
+		showMessage("status", `Launcher answered in ${elapsed} ms`);
 	}
-	showMessage("profiles-error", null);
-	showMessage("status", `Launcher answered in ${elapsed} ms`);
-	const fresh = { profiles: result.profiles, current: result.current };
-	showProfiles(fresh);
-	await chrome.storage.local.set({ [PROFILES_CACHE_KEY]: fresh });
+	const bridge = await send({ type: "bridge.status" });
+	byId("bridge").textContent = bridge.ok && bridge.connected
+		? "Agents can switch accounts and open claude.ai links here with ccp."
+		: "ccp can't reach this browser yet. Run: ccp install-host --chromium-default, then Reload extension.";
 };
 
 const showRelogin = (accounts, relogin) => {
@@ -143,12 +125,6 @@ const reloginResultText = ({ skipped, driver }) =>
 		...(skipped?.length ? [`Skipped: ${skipped.map(({ email, reason }) => `${email} (${reason})`).join(", ")}.`] : []),
 		driverText(driver),
 	].join(" ");
-
-const launchProfile = async (name) => {
-	const result = await sendNative({ type: "profiles.launch", name });
-	await refreshProfiles();
-	if (!result.ok) showMessage("profiles-error", result.error.message);
-};
 
 const switchAccount = async (label) => {
 	const result = await send({ type: "accounts.switch", label });
@@ -196,4 +172,4 @@ byId("sign-in-another").addEventListener("click", async () => {
 });
 
 renderAccounts().then(checkAccounts);
-showCachedProfiles().then(refreshProfiles);
+showBridge();

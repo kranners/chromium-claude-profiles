@@ -91,8 +91,8 @@ test("summarizeJars reports counts and never cookie contents", () => {
 	const summary = summarizeJars(jars);
 	const unchecked = { email: null, status: null, checkedAt: null };
 	assert.deepEqual(summary, [
-		{ label: "alt", savedAt: "2026-01-01T00:00:00.000Z", cookieCount: 0, ...unchecked },
-		{ label: "work", savedAt: "2026-01-02T00:00:00.000Z", cookieCount: 1, ...unchecked },
+		{ label: "alt", savedAt: "2026-01-01T00:00:00.000Z", cookieCount: 0, ...unchecked, sessionExpiresAt: null },
+		{ label: "work", savedAt: "2026-01-02T00:00:00.000Z", cookieCount: 1, ...unchecked, sessionExpiresAt: "2030-01-01T00:00:00.000Z" },
 	]);
 	assert.equal(JSON.stringify(summary).includes("fixture"), false);
 });
@@ -110,7 +110,7 @@ test("external callers cannot save or forget accounts", () => {
 	assert.equal(POPUP_TYPES.has("accounts.signIn"), true);
 	assert.deepEqual(
 		[...EXTERNAL_TYPES].sort(),
-		["accounts.list", "accounts.switch", "ping", "profiles.launch", "profiles.list"],
+		["accounts.list", "accounts.open", "accounts.switch", "ping", "profiles.list"],
 	);
 });
 
@@ -289,6 +289,7 @@ test("toAccountSummary reports the email and last check", () => {
 		email: "a@example.com",
 		status: "revoked",
 		checkedAt: "2026-01-02T00:00:00.000Z",
+		sessionExpiresAt: null,
 	});
 });
 

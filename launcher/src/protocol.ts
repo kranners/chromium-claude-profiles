@@ -1,4 +1,5 @@
-import { isSafeUrl, launchProfile, prepareProfileHosts } from "./chromium.ts";
+import { listAccounts, migrate, openAccount, openFor, resolveAccount, writeAccountsStatus } from "./accounts.ts";
+import { isSafeUrl, prepareProfileHosts } from "./chromium.ts";
 import { VERSION } from "./paths.ts";
 import { normaliseEmails, reloginStatus, startRelogin, stopRelogin } from "./relogin.ts";
 import { addProfile, ensureHome, fail, findProfile, isValidName, readProfiles, removeProfile, viewOf } from "./store.ts";
@@ -14,13 +15,23 @@ export type ErrorCode =
 	| "chromium_not_found"
 	| "unsupported"
 	| "native_host_unavailable"
+	| "browser_unavailable"
+	| "session_expired"
 	| "internal";
 export type Failure = { ok: false; error: { code: ErrorCode; message: string } };
 export type Result<T extends object> = ({ ok: true } & T) | Failure;
 
 export type Context = { home: string; env: NodeJS.ProcessEnv; current: string | null };
 
-export const NATIVE_HOST_TYPES: readonly string[] = ["ping", "profiles.list", "profiles.status", "profiles.launch", "relogin.start", "relogin.status", "relogin.stop"];
+export const NATIVE_HOST_TYPES: readonly string[] = [
+	"ping",
+	"profiles.list",
+	"profiles.status",
+	"accounts.report",
+	"relogin.start",
+	"relogin.status",
+	"relogin.stop",
+];
 
 type Request = { type: string; [param: string]: unknown };
 
@@ -62,10 +73,24 @@ const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<o
 			}
 			return removeProfile(ctx.home, req.name, req.keepData === true);
 		case "profiles.launch":
+		case "accounts.open":
 			if (req.url !== undefined && !isSafeUrl(req.url)) {
 				return fail("invalid_request", "url must be an http or https URL");
 			}
-			return withProfile(ctx, req.name, (profile) => launchProfile(ctx.home, profile, (req.url as string) ?? null, ctx.env));
+			return openAccount(ctx, req.name, req.url);
+		case "accounts.list":
+			return listAccounts(ctx).then((listed) => ({ ok: true, browser: { connected: listed.connected, updatedAt: listed.updatedAt }, active: listed.active, accounts: listed.accounts }));
+		case "accounts.status":
+			return listAccounts(ctx, { check: true }).then((listed) => {
+				const base = { browser: { connected: listed.connected, updatedAt: listed.updatedAt }, active: listed.active };
+				if (req.name === undefined) return { ok: true, ...base, accounts: listed.accounts };
+				const account = typeof req.name === "string" ? resolveAccount(listed.accounts, req.name) : null;
+				return account ? { ok: true, ...base, account } : fail("not_found", `No saved account matches ${String(req.name)}`);
+			});
+		case "accounts.openFor":
+			return openFor(ctx, req.url);
+		case "migrate":
+			return migrate(ctx);
 		case "profiles.env":
 			return withProfile(ctx, req.name, (profile) =>
 				profile.configDir === null
@@ -78,6 +103,9 @@ const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<o
 };
 
 const dispatchNative = (req: Request, ctx: Context): Result<object> | Promise<Result<object>> => {
+	if (req.type === "accounts.report") {
+		return ctx.current === null ? writeAccountsStatus(ctx.home, req.accounts) : { ok: true, ignored: true };
+	}
 	if (req.type === "relogin.status") return reloginStatus(ctx);
 	if (req.type === "relogin.stop") return stopRelogin(ctx);
 	if (req.type !== "relogin.start") return dispatch(req, ctx);

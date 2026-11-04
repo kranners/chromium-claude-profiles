@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildLaunchArgs } from "../src/chromium.ts";
+import { buildLaunchArgs, launchProfile } from "../src/chromium.ts";
 import { hostsDir, userDataDir } from "../src/paths.ts";
+import type { Profile } from "../src/protocol.ts";
 import { handle } from "../src/protocol.ts";
 import { isRunning } from "../src/running.ts";
 import { tempContext, tempDir } from "./helpers.ts";
@@ -41,16 +42,24 @@ test("launch rejects urls that are flags or not http(s)", async () => {
 	}
 });
 
-test("launch reports a missing Chromium binary", async () => {
+const added = async (ctx: ReturnType<typeof tempContext>, name: string): Promise<Profile> =>
+	((await handle({ type: "profiles.add", name }, ctx)) as unknown as { profile: Profile }).profile;
+
+test("an old profile's launch reports a missing Chromium binary", async () => {
 	const ctx = tempContext();
-	await handle({ type: "profiles.add", name: "a" }, ctx);
-	const result = await handle({ type: "profiles.launch", name: "a" }, ctx);
+	const result = await launchProfile(ctx.home, await added(ctx, "a"), null, ctx.env);
 	assert.equal(!result.ok && result.error.code, "chromium_not_found");
-	const unknown = await handle({ type: "profiles.launch", name: "zz" }, ctx);
-	assert.equal(!unknown.ok && unknown.error.code, "not_found");
 });
 
-test("launch vendors Claude in Chrome, writes host manifests and waits for the lock", async () => {
+test("launch never starts an old profile: with no main browser it reports Chromium missing", async () => {
+	const ctx = tempContext();
+	await added(ctx, "a");
+	const result = await handle({ type: "profiles.launch", name: "a" }, ctx);
+	assert.equal(!result.ok && result.error.code, "chromium_not_found");
+	assert.equal(isRunning(userDataDir(ctx.home, "a")).running, false);
+});
+
+test("an old profile's launch vendors Claude in Chrome, writes host manifests and waits for the lock", async () => {
 	const root = tempDir();
 	const source = join(root, "source");
 	mkdirSync(join(source, "1.0.102_0"), { recursive: true });
@@ -79,8 +88,7 @@ test("launch vendors Claude in Chrome, writes host manifests and waits for the l
 		CCP_EXTENSION_DIR: "/r/extension",
 		CCP_EXTRA_ARGS: " --headless=new  --mute-audio ",
 	});
-	await handle({ type: "profiles.add", name: "a" }, ctx);
-	const result = await handle({ type: "profiles.launch", name: "a", url: "https://claude.ai/" }, ctx);
+	const result = await launchProfile(ctx.home, await added(ctx, "a"), "https://claude.ai/", ctx.env);
 	const pid = isRunning(userDataDir(ctx.home, "a")).pid;
 	try {
 		assert.equal(result.ok, true);

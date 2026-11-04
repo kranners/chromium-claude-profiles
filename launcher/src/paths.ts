@@ -41,4 +41,8 @@ export const userDataDir = (home: string, name: string): string => join(home, "p
 export const hostsDir = (home: string, name: string): string =>
 	join(userDataDir(home, name), "NativeMessagingHosts");
 
+export const runDir = (home: string): string => join(home, "run");
+export const bridgeSocket = (home: string, browser: string): string => join(runDir(home), `${browser}.sock`);
+export const accountsStatusFile = (home: string): string => join(home, "accounts.json");
+
 export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;

@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { MAIN_BROWSER, MAIN_BRIDGE_TYPES, PROFILE_BRIDGE_TYPES, serveBridge } from "./bridge.ts";
+import type { Bridge } from "./bridge.ts";
 import { EXTENSION_ID } from "./hostManifest.ts";
 import { handleNative } from "./protocol.ts";
 import type { Context } from "./protocol.ts";
 import { fail, readProfiles } from "./store.ts";
-import { userDataDir } from "./paths.ts";
+import { bridgeSocket, userDataDir } from "./paths.ts";
 import { userDataDirFromArgs } from "./running.ts";
 
 export const EXPECTED_ORIGIN = `chrome-extension://${EXTENSION_ID}/`;
@@ -52,7 +54,7 @@ export const runNativeHost = (
 		const respond = (msg: unknown) => {
 			queue = queue.then(async () => {
 				const response = await handler(msg).catch((error: Error) => fail("internal", error.message));
-				output.write(encodeCapped(response));
+				if (response !== undefined) output.write(encodeCapped(response));
 			});
 		};
 		const decode = createDecoder(respond);
@@ -87,7 +89,29 @@ export const currentProfileFromParent = (home: string, ppid: number = process.pp
 	}
 };
 
-export const createNativeHandler = (origin: string | undefined, ctx: Context): ((msg: unknown) => Promise<unknown>) =>
-	origin === EXPECTED_ORIGIN
-		? (msg) => handleNative(msg, ctx)
-		: async () => fail("unauthorized", "Caller origin is not allowed");
+const messageType = (msg: unknown): string | null =>
+	typeof msg === "object" && msg !== null && typeof (msg as { type?: unknown }).type === "string" ? (msg as { type: string }).type : null;
+
+export const createNativeHandler = (
+	origin: string | undefined,
+	ctx: Context,
+	write: (msg: unknown) => void = () => undefined,
+): ((msg: unknown) => Promise<unknown>) & { bridge: () => Bridge | null } => {
+	let bridge: Bridge | null = null;
+	const handler = async (msg: unknown): Promise<unknown> => {
+		if (origin !== EXPECTED_ORIGIN) return fail("unauthorized", "Caller origin is not allowed");
+		const type = messageType(msg);
+		if (type === "bridge.reply") {
+			bridge?.reply(msg);
+			return undefined;
+		}
+		if (type === "bridge.attach") {
+			if (bridge) return { ok: true, attached: true };
+			const browser = ctx.current === null ? MAIN_BROWSER : `profile-${ctx.current}`;
+			bridge = await serveBridge(bridgeSocket(ctx.home, browser), ctx.current === null ? MAIN_BRIDGE_TYPES : PROFILE_BRIDGE_TYPES, write);
+			return { ok: true, attached: true, browser: ctx.current === null ? MAIN_BROWSER : ctx.current };
+		}
+		return handleNative(msg, ctx);
+	};
+	return Object.assign(handler, { bridge: () => bridge });
+};
