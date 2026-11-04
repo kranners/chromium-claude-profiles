@@ -15,6 +15,7 @@ const USAGE = `usage:
   ccp list [--json]
   ccp status [<account>] [--json]
   ccp launch <account> [--url U] [--json]
+  ccp switch <account> [--json]
   ccp open-for <claude.ai url> [--json]
   ccp migrate [--json]
   ccp add <name> [--email E] [--config-dir D] [--json]      (old per-account profiles)
@@ -150,6 +151,11 @@ const launch = async (args: string[]): Promise<number> => {
 	});
 };
 
+const switchCommand = async (args: string[]): Promise<number> => {
+	const { values, positionals } = parse(args, JSON_FLAG, { min: 1, max: 1 });
+	return launch([positionals[0], ...(values.json === true ? ["--json"] : [])]);
+};
+
 const status = async (args: string[]): Promise<number> => {
 	const { values, positionals } = parse(args, JSON_FLAG, { min: 0, max: 1 });
 	const result = await handle({ type: "accounts.status", name: positionals[0] }, context());
@@ -253,6 +259,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
 	add,
 	remove,
 	launch,
+	switch: switchCommand,
 	status,
 	"open-for": openForCommand,
 	migrate: migrateCommand,

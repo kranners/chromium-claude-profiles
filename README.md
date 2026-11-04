@@ -12,6 +12,7 @@ ln -s "$PWD/launcher/bin/ccp" ~/.local/bin/ccp
 ccp list [--json]                       saved accounts, which is active, last known status
 ccp status [<account>] [--json]         checks every saved session now
 ccp launch <account> [--url U] [--json] switch your main Chromium to the account, then open U
+ccp switch <account> [--json]           switch your main Chromium to the account, opening nothing
 ccp open-for <claude.ai url> [--json]   open a link in whichever account can see it
 ccp migrate [--json]                    move the old per-account profiles' sessions into the main Chromium
 ccp serve [--port N]
@@ -41,7 +42,8 @@ and waits for the extension to connect.
 **Limits.** Chromium keeps one cookie store per profile, not per tab, so only one claude.ai account is
 active in the browser at a time. Switching reloads every claude.ai tab into the new account, and two agents
 asking for different accounts at once take turns: each `ccp launch` switches on demand and the last one
-wins. Claude in Chrome keeps its own single login in this browser, so only Claude Code on that account
+wins. The extension has no per-tab cookie scope, so a second window does not give two accounts at once
+either. You can switch at will from the popup; agents switch the same way through `ccp`. Claude in Chrome keeps its own single login in this browser, so only Claude Code on that account
 pairs with it; agents on other accounts drive through `ccp` and see the page by other means.
 
 `ccp open-for` tries the active account first, then every other saved account not known to be signed
@@ -58,6 +60,11 @@ it a busy machine spends about a second starting a renderer for every open. "Lau
 confirms the native host is working.
 
 ### Moving off the old per-account profiles
+
+On a Mac that still runs the old profiles, `scripts/pilot-migrate.sh` does the whole move in one safe,
+repeatable command (`--dry-run` prints the plan): it updates this checkout, installs the host, checks the
+extension in the main Chromium, runs `ccp migrate`, quits the old profile browsers and lists who needs a
+sign-in. See `scripts/README.md`.
 
 `ccp migrate` starts each old profile under `~/.config/chromium-claude-profiles/profiles/` headless
 (or uses it if it is already open), reads its live claude.ai session through its own extension, and saves
@@ -151,7 +158,7 @@ Claude Code and Claude in Chrome meet on the account's cloud bridge channel, not
 ### Tests
 
 ```sh
-node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'
+node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'   # pilotMigrate.test.ts needs bash, git and ps
 node tests/e2e/smoke.ts    # CCP_CHROMIUM=<chromium> CCP_E2E_EXTRA_ARGS=--no-sandbox off a Mac
 ```
 
