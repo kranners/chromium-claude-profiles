@@ -61,10 +61,10 @@ chromium-claude-profiles/
     popup.html  popup.css  popup.js
     lib/protocol.js  lib/native.js  lib/jars.js
     test/jars.test.js
-  (kanban changes live in /Users/aaronpierce/workspace/kanban)   (KANBAN builder)
+  (kanban changes live in ~/workspace/kanban)   (KANBAN builder)
 ```
 
-Run every test with `/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'`. There is no npm, no dependencies and no build step.
+Run every test with `node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'`. There is no npm, no dependencies and no build step.
 
 ## 2. Naming and fixed constants (no employer names anywhere)
 
@@ -114,7 +114,7 @@ The derivation is `sha256(DER)`, then the first 32 hex characters, each mapped t
 ```sh
 #!/bin/sh
 dir=$(cd "$(dirname "$0")/.." && pwd -P)
-node=${CCP_NODE:-/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node}
+node=${CCP_NODE:-$(command -v node)}
 exec "$node" --disable-warning=ExperimentalWarning "$dir/src/cli.ts" "$@"
 ```
 
@@ -530,7 +530,7 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 - `node --test 'extension/test/*.test.js'` passes: the infra filter, hostOnly domain omission, session-cookie expiration omission, and the URL built for `.claude.ai` versus `claude.ai`.
 - No occurrence of `console.log(` that could contain cookie objects. `grep -n "value" extension/*.js extension/lib/*.js` shows value used only inside `toSavedCookie` and `toSetDetails`.
 
-## 6. kanban integration (`/Users/aaronpierce/workspace/kanban`)
+## 6. kanban integration (`~/workspace/kanban`)
 
 **kanban is a PUBLIC repository** (`kranners/kanban`, AGPL).
 

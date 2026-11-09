@@ -7,7 +7,7 @@ import { fail } from "./store.ts";
 
 export const MAIN_BROWSER = "main";
 
-export const MAIN_BRIDGE_TYPES: readonly string[] = ["ping", "accounts.list", "accounts.check", "accounts.open", "accounts.openFor", "accounts.import"];
+export const MAIN_BRIDGE_TYPES: readonly string[] = ["ping", "accounts.list", "accounts.check", "accounts.open", "accounts.openFor", "accounts.import", "accounts.save", "accounts.signIn"];
 export const PROFILE_BRIDGE_TYPES: readonly string[] = ["ping", "accounts.exportLive"];
 
 const MAX_LINE_BYTES = 256 * 1024;

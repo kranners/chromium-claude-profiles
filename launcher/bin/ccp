@@ -1,4 +1,5 @@
 #!/bin/sh
+# Resolve symlinks so `ccp` works from anywhere on PATH.
 self=$0
 while [ -L "$self" ]; do
 	target=$(readlink "$self")
@@ -8,5 +9,17 @@ while [ -L "$self" ]; do
 	esac
 done
 dir=$(cd "$(dirname "$self")/.." && pwd -P)
-node=${CCP_NODE:-/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node}
+# Node 24 or newer: $CCP_NODE, else the path install.sh saved, else whatever `node` is on PATH.
+home=${CCP_HOME:-$HOME/.config/chromium-claude-profiles}
+node=$CCP_NODE
+if [ -z "$node" ] && [ -r "$home/node" ]; then
+	node=$(cat "$home/node")
+fi
+if [ -z "$node" ] || [ ! -x "$node" ]; then
+	node=$(command -v node)
+fi
+if [ -z "$node" ]; then
+	echo "ccp: Node 24 or newer not found. Install it, then run install.sh again (or set CCP_NODE)." >&2
+	exit 127
+fi
 exec "$node" --disable-warning=ExperimentalWarning "$dir/src/cli.ts" "$@"

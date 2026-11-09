@@ -93,7 +93,7 @@ export const summarizeJars = (jars) =>
 		.map(([label, jar]) => toAccountSummary(label, jar))
 		.sort((a, b) => a.label.localeCompare(b.label));
 
-const readJars = async () => (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY] ?? {};
+export const readJars = async () => (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY] ?? {};
 
 const revokedCount = (jars) => summarizeJars(jars).filter((summary) => isSignedOut(summary)).length;
 
@@ -174,11 +174,20 @@ const withCookies = (jar, cookies, result) => {
 const checkFailed = () => failure("internal", "Couldn't reach claude.ai to check the session. Try again.");
 
 let queue = Promise.resolve();
+let pendingOps = 0;
+let lastSwitchAt = 0;
 
-const serial =
+// True while any queued account operation is waiting or running; auto-swap stays out of its way.
+export const isBusy = () => pendingOps > 0;
+
+// Milliseconds since the cookie jar last changed account, so auto-swap ignores the reloads that causes.
+export const msSinceSwitch = () => Date.now() - lastSwitchAt;
+
+export const serial =
 	(fn) =>
 	(...args) => {
-		const run = queue.then(() => fn(...args));
+		pendingOps++;
+		const run = queue.then(() => fn(...args)).finally(() => pendingOps--);
 		queue = run.catch(() => undefined);
 		return run;
 	};
@@ -250,8 +259,9 @@ const keepOutgoingSession = async (outgoing, cookies) => {
 	if (label !== null) await updateJar(label, (jar) => withCookies(jar, cookies, outgoing));
 };
 
-const doSwitch = async (label) => {
+export const doSwitch = async (label) => {
 	if (!isLabel(label)) return invalidLabel();
+	lastSwitchAt = Date.now();
 	const jar = savedJar(await readJars(), label);
 	if (!Array.isArray(jar?.cookies)) return unknownLabel(label);
 	const previous = (await accountCookies()).map(toSavedCookie);
@@ -265,7 +275,9 @@ const doSwitch = async (label) => {
 	}
 	await updateJar(label, (saved) => withCheck(saved, result, new Date().toISOString()));
 	await keepOutgoingSession(outgoing, previous);
-	return { ok: true, email: result.email, reloadedTabs: await reloadClaudeTabs() };
+	const reloadedTabs = await reloadClaudeTabs();
+	lastSwitchAt = Date.now();
+	return { ok: true, email: result.email, reloadedTabs };
 };
 
 export const switchAccount = serial(doSwitch);
@@ -419,7 +431,7 @@ export const isClaudeUrl = (url) => {
 	return protocol === "https:" && (hostname === COOKIE_DOMAIN || hostname.endsWith(`.${COOKIE_DOMAIN}`));
 };
 
-const activeLabel = async (jars) => {
+export const activeLabel = async (jars) => {
 	const live = await checkLive();
 	return live.status === "ok" ? labelForEmail(jars, live.email) : null;
 };
@@ -495,7 +507,7 @@ const pageText = async (tabId) => {
 	return typeof frame?.result === "string" ? frame.result : "";
 };
 
-const waitForVerdict = async (tabId) => {
+export const waitForVerdict = async (tabId, classify = classifyPage) => {
 	const started = Date.now();
 	let loadedAt = null;
 	while (Date.now() - started < PAGE_GIVE_UP_MS) {
@@ -504,7 +516,7 @@ const waitForVerdict = async (tabId) => {
 		if (tab.status === "complete" && loadedAt === null) loadedAt = Date.now();
 		if (loadedAt === null && Date.now() - started > PAGE_LOAD_MS) loadedAt = Date.now();
 		if (loadedAt !== null) {
-			const verdict = classifyPage({ url: tab.url ?? "", text: await pageText(tabId), settled: Date.now() - loadedAt >= PAGE_SETTLE_MS });
+			const verdict = classify({ url: tab.url ?? "", text: await pageText(tabId), settled: Date.now() - loadedAt >= PAGE_SETTLE_MS });
 			if (verdict) return verdict;
 		}
 		await pause(PAGE_POLL_MS);
@@ -588,4 +600,16 @@ export const importAccount = serial(async (label, cookies) => {
 	const current = await readJars();
 	await writeJars({ ...current, [target]: withCookies(savedJar(current, target) ?? {}, saved, result) });
 	return { ok: true, imported: true, label: target, email: result.email };
+});
+
+// Sign-in for agents and the CLI: refuses while the account signed in now is not saved, because
+// opening the login page clears claude.ai's cookies in this browser and that session would be lost.
+export const signInAnotherSaved = serial(async () => {
+	const live = await checkLive();
+	if (live.status === "ok" && labelForEmail(await readJars(), live.email) === null) {
+		return failure("invalid_request", "The account signed in now is not saved. Run ccp save <label> first, or it would be signed out here.");
+	}
+	await clearAccountCookies();
+	await chrome.tabs.create({ url: "https://claude.ai/login" });
+	return { ok: true };
 });

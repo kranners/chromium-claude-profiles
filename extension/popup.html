@@ -5,6 +5,7 @@
 		<title>Claude Profiles</title>
 		<link rel="stylesheet" href="popup.css" />
 		<script type="module" src="popup.js"></script>
+		<script type="module" src="popup-autoswap.js"></script>
 	</head>
 	<body>
 		<section>
@@ -12,6 +13,18 @@
 			<p id="bridge" class="helper">Checking whether ccp can reach this browser…</p>
 			<p id="profiles-error" class="error" hidden></p>
 			<p class="status"><span id="status" hidden></span> <button id="reload" type="button" class="link">Reload extension</button></p>
+		</section>
+		<section>
+			<h1>Auto-swap</h1>
+			<label class="helper"><input id="autoswap-enabled" type="checkbox" checked /> Switch to the account that owns a claude.ai link</label>
+			<p class="helper">Opens of code sessions, chats, projects, artifacts and shared links switch to the saved account that can see them, then reload the tab. Switching reloads every claude.ai tab.</p>
+			<p id="autoswap-pending" class="helper" hidden>A link is waiting: confirm auto-swap on the claude.ai tab, or turn it on here.</p>
+			<div id="autoswap-link" hidden>
+				<p id="autoswap-link-key" class="helper"></p>
+				<label class="helper"><input id="autoswap-link-optout" type="checkbox" /> Never auto-swap for this link</label>
+			</div>
+			<p id="autoswap-last" class="helper" hidden></p>
+			<button id="autoswap-clear" type="button">Forget remembered links</button>
 		</section>
 		<section>
 			<h1>claude.ai account</h1>

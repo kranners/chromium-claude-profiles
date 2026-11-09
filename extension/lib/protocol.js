@@ -14,7 +14,15 @@ export const POPUP_TYPES = new Set([
 	"accounts.relogin",
 	"accounts.reloginCancel",
 	"bridge.status",
+	"autoswap.get",
+	"autoswap.setEnabled",
+	"autoswap.setLinkOptOut",
+	"autoswap.forgetLink",
+	"autoswap.clearCache",
 ]);
+
+// The only request the confirmation banner injected into a claude.ai tab may send.
+export const CONTENT_TYPES = new Set(["autoswap.setEnabled"]);
 
 export const failure = (code, message) => ({ ok: false, error: { code, message } });
 

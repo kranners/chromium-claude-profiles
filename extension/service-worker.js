@@ -1,6 +1,7 @@
-import { EXTERNAL_TYPES, NATIVE_TYPES, POPUP_TYPES, failure, isRequest } from "./lib/protocol.js";
+import { CONTENT_TYPES, EXTERNAL_TYPES, NATIVE_TYPES, POPUP_TYPES, failure, isRequest } from "./lib/protocol.js";
 import { sendNative } from "./lib/native.js";
 import { bridgeConnected, connectBridge } from "./lib/bridge.js";
+import { autoswapHandlers, startAutoSwap } from "./lib/autoswap.js";
 import {
 	cancelRelogin,
 	checkAccounts,
@@ -15,7 +16,7 @@ import {
 	listAccounts,
 	onCookieChanged,
 	saveAccount,
-	signInAnother,
+	signInAnotherSaved,
 	startRelogin,
 	switchAccount,
 } from "./lib/jars.js";
@@ -47,6 +48,7 @@ const accountHandlers = {
 		return external ? withoutEmail(result) : result;
 	},
 	"bridge.status": () => ({ ok: true, connected: bridgeConnected() }),
+	...autoswapHandlers,
 };
 
 const bridgeHandlers = {
@@ -56,6 +58,8 @@ const bridgeHandlers = {
 	"accounts.open": (msg) => openAccount(msg.label, msg.url ?? null),
 	"accounts.openFor": (msg) => openFor(msg.url),
 	"accounts.import": (msg) => importAccount(msg.label, msg.cookies),
+	"accounts.save": (msg) => saveAccount(msg.label),
+	"accounts.signIn": () => signInAnotherSaved(),
 	"accounts.exportLive": () => exportLive(),
 };
 
@@ -68,13 +72,14 @@ const startBridge = () => connectBridge(handleBridge);
 
 const unsupported = (type) => failure("unsupported", `Unsupported request type: ${type}`);
 
-export const dispatch = async (msg, { external }) => {
+const allowedTypes = ({ external, content }) => (content ? CONTENT_TYPES : external ? EXTERNAL_TYPES : POPUP_TYPES);
+
+export const dispatch = async (msg, { external, content = false, tabId }) => {
 	if (!isRequest(msg)) return failure("invalid_request", "Request must be an object with a string type");
-	const allowed = external ? EXTERNAL_TYPES : POPUP_TYPES;
-	if (!allowed.has(msg.type)) return unsupported(msg.type);
+	if (!allowedTypes({ external, content }).has(msg.type)) return unsupported(msg.type);
 	try {
 		if (NATIVE_TYPES.has(msg.type)) return await sendNative(msg);
-		return await accountHandlers[msg.type](msg, external);
+		return await accountHandlers[msg.type](msg, external, tabId);
 	} catch (error) {
 		return failure("internal", error instanceof Error ? error.message : String(error));
 	}
@@ -82,8 +87,13 @@ export const dispatch = async (msg, { external }) => {
 
 globalThis.dispatch = dispatch;
 
-const respondWith = (external) => (msg, _sender, sendResponse) => {
-	dispatch(msg, { external }).then(sendResponse);
+// A content script is our own injected banner: a sender with a tab whose page is not one of the extension's.
+const isContentSender = (sender) =>
+	sender?.tab !== undefined && typeof sender.url === "string" && !sender.url.startsWith(chrome.runtime.getURL(""));
+
+const respondWith = (external) => (msg, sender, sendResponse) => {
+	const content = !external && isContentSender(sender);
+	dispatch(msg, { external, content, tabId: content ? sender.tab.id : undefined }).then(sendResponse);
 	return true;
 };
 
@@ -119,6 +129,7 @@ chrome.runtime.onStartup.addListener(onBrowserStart);
 chrome.runtime.onInstalled.addListener(onBrowserStart);
 keepPopupWarm();
 startBridge();
+startAutoSwap();
 
 chrome.alarms.onAlarm.addListener((alarm) => onAlarm(alarm).catch(() => undefined));
 chrome.cookies.onChanged.addListener(onCookieChanged);

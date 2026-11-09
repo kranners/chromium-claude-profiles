@@ -1,5 +1,7 @@
 import { listAccounts, migrate, openAccount, openFor, resolveAccount, writeAccountsStatus } from "./accounts.ts";
+import { callBridge, MAIN_BROWSER } from "./bridge.ts";
 import { isSafeUrl, prepareProfileHosts } from "./chromium.ts";
+import { bridgeSocket } from "./paths.ts";
 import { VERSION } from "./paths.ts";
 import { normaliseEmails, reloginStatus, startRelogin, stopRelogin } from "./relogin.ts";
 import { addProfile, ensureHome, fail, findProfile, isValidName, readProfiles, removeProfile, viewOf } from "./store.ts";
@@ -89,6 +91,11 @@ const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<o
 			});
 		case "accounts.openFor":
 			return openFor(ctx, req.url);
+		case "accounts.save":
+		case "accounts.signIn":
+			return req.type === "accounts.save" && typeof req.label !== "string"
+				? fail("invalid_request", "Name the account")
+				: callBridge(bridgeSocket(ctx.home, MAIN_BROWSER), { type: req.type, label: req.label }, 60_000);
 		case "migrate":
 			return migrate(ctx);
 		case "profiles.env":
