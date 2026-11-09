@@ -229,6 +229,7 @@ test("external callers never see the switched account's email", async () => {
 		alarms: { onAlarm: listener },
 	});
 	globalThis.chrome.cookies.onChanged = listener;
+	globalThis.chrome.tabs = { ...globalThis.chrome.tabs, onUpdated: listener, onRemoved: listener };
 	try {
 		const { dispatch } = await import("../service-worker.js");
 		assert.deepEqual(await dispatch({ type: "accounts.switch", label: "A" }, { external: true }), { ok: true, reloadedTabs: 1 });
