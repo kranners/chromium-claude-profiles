@@ -3,7 +3,9 @@ import type { ParseArgsConfig } from "node:util";
 import { installHostInto, writeOurManifest, writeWrapper } from "./hostManifest.ts";
 import { claudeCodeManifestSource } from "./hostManifest.ts";
 import { createNativeHandler, currentProfileFromParent, encodeMessage, runNativeHost } from "./nativeHost.ts";
-import { DEFAULT_PORT, ccpHome, chromiumDefaultHostsDir, hostsDir, shellQuote, tokenFile } from "./paths.ts";
+import { BROWSERS, DEFAULT_PORT, browserFile, ccpHome, chromiumDefaultHostsDir, hostsDir, isBrowser, nodeFile, shellQuote, tokenFile } from "./paths.ts";
+import { diagnose, gather } from "./doctor.ts";
+import { writeFileSync } from "node:fs";
 import { handle } from "./protocol.ts";
 import type { AccountView, MigrationRow } from "./accounts.ts";
 import type { ProfileView, Result } from "./protocol.ts";
@@ -18,11 +20,14 @@ const USAGE = `usage:
   ccp switch <account> [--json]
   ccp open-for <claude.ai url> [--json]
   ccp migrate [--json]
+  ccp save <label> [--json]
+  ccp sign-in-another [--json]
+  ccp doctor [--json]
   ccp add <name> [--email E] [--config-dir D] [--json]      (old per-account profiles)
   ccp remove <name> [--keep-data] [--json]                  (old per-account profiles)
   ccp env <name>
   ccp serve [--port N]
-  ccp install-host [--chromium-default]
+  ccp install-host [--browser chromium|chrome|brave] [--chromium-default]
   ccp native-host <origin>
 `;
 
@@ -226,17 +231,54 @@ const serve = async (args: string[]): Promise<number> => {
 	return 0;
 };
 
+const saveCommand = async (args: string[]): Promise<number> => {
+	const { values, positionals } = parse(args, JSON_FLAG, { min: 1, max: 1 });
+	const result = await handle({ type: "accounts.save", label: positionals[0] }, context());
+	return report(result, values.json === true, (ok) => {
+		const account = ok.account as { label: string; email: string | null };
+		return `saved ${account.label}${account.email ? ` (${account.email})` : ""}\n`;
+	});
+};
+
+const signInAnotherCommand = async (args: string[]): Promise<number> => {
+	const { values } = parse(args, JSON_FLAG, { min: 0, max: 0 });
+	const result = await handle({ type: "accounts.signIn" }, context());
+	return report(result, values.json === true, () => "Opened the claude.ai sign-in page. Sign in there, then run: ccp save <label>\n");
+};
+
+const doctor = async (args: string[]): Promise<number> => {
+	const { values } = parse(args, JSON_FLAG, { min: 0, max: 0 });
+	const diagnosis = diagnose(await gather(context()));
+	if (values.json === true) {
+		process.stdout.write(`${JSON.stringify(diagnosis)}\n`);
+	} else {
+		const lines = diagnosis.checks.map((check) => `${check.ok ? "ok  " : "FAIL"} ${check.name}: ${check.detail}`);
+		process.stdout.write(`${lines.join("\n")}\nNext: ${diagnosis.next}\n`);
+	}
+	return diagnosis.ready ? 0 : 3;
+};
+
 const installHost = async (args: string[]): Promise<number> => {
-	const { values } = parse(args, { "chromium-default": { type: "boolean" } }, { min: 0, max: 0 });
+	const { values } = parse(
+		args,
+		{ "chromium-default": { type: "boolean" }, browser: { type: "string" }, node: { type: "string" } },
+		{ min: 0, max: 0 },
+	);
 	const home = ccpHome(process.env);
 	ensureHome(home);
+	if (values.browser !== undefined) {
+		if (!isBrowser(values.browser)) throw new UsageError(`--browser must be one of ${BROWSERS.join(", ")}`);
+		writeFileSync(browserFile(home), `${values.browser}\n`);
+		process.env.CCP_BROWSER = values.browser;
+	}
+	writeFileSync(nodeFile(home), `${process.execPath}\n`);
 	writeWrapper(home);
 	const installed = readProfiles(home).map((profile) => {
 		const dir = hostsDir(home, profile.name);
 		installHostInto(home, dir, claudeCodeManifestSource(process.env));
 		return dir;
 	});
-	if (values["chromium-default"] === true) {
+	if (values["chromium-default"] === true || values.browser !== undefined) {
 		const dir = chromiumDefaultHostsDir(process.env);
 		writeOurManifest(home, dir);
 		installed.push(dir);
@@ -263,6 +305,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<number>> = {
 	status,
 	"open-for": openForCommand,
 	migrate: migrateCommand,
+	save: saveCommand,
+	"sign-in-another": signInAnotherCommand,
+	doctor,
 	env,
 	serve,
 	"install-host": installHost,

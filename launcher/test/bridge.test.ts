@@ -50,7 +50,7 @@ test("the bridge forwards one request per connection and answers on the same soc
 		assert.equal(statSync(dirname(socket)).mode & 0o777, 0o700);
 		assert.deepEqual(await callBridge(socket, { type: "accounts.list" }), { ok: true, echoed: "accounts.list" });
 		assert.deepEqual(browser.requests, [{ type: "accounts.list" }]);
-		const refused = await callBridge(socket, { type: "accounts.save" });
+		const refused = await callBridge(socket, { type: "accounts.forget" });
 		assert.equal(!refused.ok && refused.error.code, "unsupported");
 		assert.equal(browser.requests.length, 1);
 	} finally {

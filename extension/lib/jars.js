@@ -601,3 +601,15 @@ export const importAccount = serial(async (label, cookies) => {
 	await writeJars({ ...current, [target]: withCookies(savedJar(current, target) ?? {}, saved, result) });
 	return { ok: true, imported: true, label: target, email: result.email };
 });
+
+// Sign-in for agents and the CLI: refuses while the account signed in now is not saved, because
+// opening the login page clears claude.ai's cookies in this browser and that session would be lost.
+export const signInAnotherSaved = serial(async () => {
+	const live = await checkLive();
+	if (live.status === "ok" && labelForEmail(await readJars(), live.email) === null) {
+		return failure("invalid_request", "The account signed in now is not saved. Run ccp save <label> first, or it would be signed out here.");
+	}
+	await clearAccountCookies();
+	await chrome.tabs.create({ url: "https://claude.ai/login" });
+	return { ok: true };
+});
