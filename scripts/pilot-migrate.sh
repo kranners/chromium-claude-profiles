@@ -36,7 +36,7 @@ CHROMIUM_DIR=${CCP_CHROMIUM_SUPPORT:-$HOME/Library/Application Support/Chromium}
 BIN_LINK=${CCP_BIN_LINK:-$HOME/.local/bin/ccp}
 REMOTE_URL=${CCP_REMOTE:-git@github.com:kranners/chromium-claude-profiles.git}
 EXT_ID=bkgjdpakjigjgdggfcckikppbjjcdkim
-NODE=${CCP_NODE:-/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node}
+NODE=${CCP_NODE:-$(cat "$CCP_HOME/node" 2>/dev/null || command -v node || true)}
 BRIDGE_WAIT=${CCP_BRIDGE_WAIT:-90}
 export CCP_HOME
 

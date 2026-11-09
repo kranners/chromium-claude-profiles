@@ -64,7 +64,7 @@ chromium-claude-profiles/
   (kanban changes live in /Users/aaronpierce/workspace/kanban)   (KANBAN builder)
 ```
 
-Run every test with `/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'`. There is no npm, no dependencies and no build step.
+Run every test with `node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'`. There is no npm, no dependencies and no build step.
 
 ## 2. Naming and fixed constants (no employer names anywhere)
 
@@ -114,7 +114,7 @@ The derivation is `sha256(DER)`, then the first 32 hex characters, each mapped t
 ```sh
 #!/bin/sh
 dir=$(cd "$(dirname "$0")/.." && pwd -P)
-node=${CCP_NODE:-/nix/store/a2v4cjj3vsy455nxxgdi3hfq46qic0wq-nodejs-slim-24.21.0/bin/node}
+node=${CCP_NODE:-$(command -v node)}
 exec "$node" --disable-warning=ExperimentalWarning "$dir/src/cli.ts" "$@"
 ```
 
