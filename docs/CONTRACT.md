@@ -61,7 +61,7 @@ chromium-claude-profiles/
     popup.html  popup.css  popup.js
     lib/protocol.js  lib/native.js  lib/jars.js
     test/jars.test.js
-  (kanban changes live in /Users/aaronpierce/workspace/kanban)   (KANBAN builder)
+  (kanban changes live in ~/workspace/kanban)   (KANBAN builder)
 ```
 
 Run every test with `node --test 'launcher/test/*.test.ts' 'extension/test/*.test.js'`. There is no npm, no dependencies and no build step.
@@ -530,7 +530,7 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 - `node --test 'extension/test/*.test.js'` passes: the infra filter, hostOnly domain omission, session-cookie expiration omission, and the URL built for `.claude.ai` versus `claude.ai`.
 - No occurrence of `console.log(` that could contain cookie objects. `grep -n "value" extension/*.js extension/lib/*.js` shows value used only inside `toSavedCookie` and `toSetDetails`.
 
-## 6. kanban integration (`/Users/aaronpierce/workspace/kanban`)
+## 6. kanban integration (`~/workspace/kanban`)
 
 **kanban is a PUBLIC repository** (`kranners/kanban`, AGPL).
 
