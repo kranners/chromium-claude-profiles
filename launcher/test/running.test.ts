@@ -44,7 +44,7 @@ test("a missing lock is not running", () => {
 });
 
 const withProcess = async (args: string[], check: (pid: number) => void): Promise<void> => {
-	const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", ...args], { stdio: "ignore" });
+	const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "--", ...args], { stdio: "ignore" });
 	try {
 		check(child.pid as number);
 	} finally {
