@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EE9468"/><stop offset="1" stop-color="#BF5B3A"/></linearGradient>
+    <g id="crab"><rect x="8" y="0" width="56" height="26"/><rect x="0" y="8" width="10" height="11"/><rect x="62" y="8" width="10" height="11"/><rect x="13" y="24" width="5" height="10"/><rect x="24" y="24" width="5" height="10"/><rect x="43" y="24" width="5" height="10"/><rect x="54" y="24" width="5" height="10"/></g>
+    <g id="eyes"><rect x="23" y="6" width="5" height="10"/><rect x="44" y="6" width="5" height="10"/></g>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <g transform="translate(0,-2)">
+    <g transform="translate(6,50) scale(.66)"><use href="#crab" fill="#F6D9BE"/><use href="#eyes" fill="#BF5B3A"/></g>
+    <g transform="translate(74,50) scale(.66)"><use href="#crab" fill="#3B2A22"/><use href="#eyes" fill="#F6D9BE"/></g>
+    <g transform="translate(26,26)"><use href="#crab" fill="#BF5B3A" stroke="#BF5B3A" stroke-width="8" stroke-linejoin="round"/><use href="#crab" fill="#FFF6EA"/><use href="#eyes" fill="#3B2A22"/></g>
+    <g fill="none" stroke="#FFF6EA" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M30 88 H96 M86 80 L96 88 L86 96"/><path d="M98 106 H32 M42 98 L32 106 L42 114"/></g>
+  </g>
+</svg>
