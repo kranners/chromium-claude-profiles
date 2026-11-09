@@ -6,6 +6,8 @@ export const SUPPRESS_AFTER_SWITCH_MS = 20_000;
 export const TAB_COOLDOWN_MS = 60_000;
 export const UNRESOLVED_MS = 10 * 60_000;
 export const MAX_CACHE_ENTRIES = 500;
+// claude.ai sends a chat it cannot show to /new with a toast; a redirect this soon after the link loaded counts.
+export const REDIRECT_WINDOW_MS = 8_000;
 
 // claude.ai paths whose second segment is an id of something one account owns.
 const RESOURCE_ROOTS = new Set(["chat", "chats", "code", "project", "projects", "artifacts", "share", "task", "tasks"]);
@@ -82,9 +84,25 @@ export const skipReason = ({ settings, key, tabId, now, lastSwitchMs, handled, u
 
 // Stricter than open-for's heuristic: a stray "not found" in a chat must not read as a missing page.
 const MISSING =
-	/couldn[’']?t be found|could not be found|(session|conversation|chat|project|artifact|page) (was )?not found|does(n[’']?t| not) exist|(don[’']?t|do not) have access to (this|that)/i;
+	/couldn[’']?t be found|could not be found|no longer available|(session|conversation|chat|project|artifact|page) (was )?not found|does(n[’']?t| not) exist|(don[’']?t|do not) have access to (this|that)/i;
 
-export const classifyLinkPage = ({ url, text, settled }) => {
+export const isMissingText = (text) => MISSING.test((text ?? "").slice(0, 1500));
+
+// True when a tab that just loaded a resource link is now somewhere else on claude.ai.
+export const redirectedAway = ({ pending, now, url }) =>
+	pending !== undefined &&
+	now - pending.at < REDIRECT_WINDOW_MS &&
+	linkKey(url) === null &&
+	(() => {
+		try {
+			return new URL(url).hostname === "claude.ai" && !/^\/(login|magic-link)\b/.test(new URL(url).pathname);
+		} catch {
+			return false;
+		}
+	})();
+
+// `key` is the link being judged: landing somewhere else on claude.ai means the link was not available.
+export const classifyLinkPage = ({ url, text, settled, key }) => {
 	let path = "";
 	try {
 		path = new URL(url).pathname;
@@ -92,7 +110,8 @@ export const classifyLinkPage = ({ url, text, settled }) => {
 		return null;
 	}
 	if (/^\/(login|magic-link)\b/.test(path)) return "signed-out";
-	if (MISSING.test((text ?? "").slice(0, 1500))) return "not-found";
+	if (isMissingText(text)) return "not-found";
+	if (key !== undefined && linkKey(url) !== key) return "not-found";
 	return settled ? "found" : null;
 };
 
@@ -100,7 +119,7 @@ export const classifyLinkPage = ({ url, text, settled }) => {
 //   verdict()       what the tab shows under the account active now: found | not-found | signed-out | closed
 //   switchTo(label) make that account active; true on success
 //   show()          put the original link back in the tab after a switch
-export const resolveLink = async ({ cachedLabel, active, labels, deps }) => {
+export const resolveLink = async ({ cachedLabel, active, labels, deps, activeMissing = false }) => {
 	const usable = [...new Set(labels)].sort();
 	if (active === null) return { outcome: "skipped", reason: "active-account-not-saved", tried: [] };
 	if (usable.length < 2) return { outcome: "skipped", reason: "single-account", tried: [] };
@@ -125,7 +144,8 @@ export const resolveLink = async ({ cachedLabel, active, labels, deps }) => {
 			current = label;
 			await deps.show();
 		}
-		const result = await deps.verdict();
+		const assumed = activeMissing && label === active && tried.length === 0;
+		const result = assumed ? "not-found" : await deps.verdict();
 		tried.push({ label, result });
 		if (result === "found") return { outcome: label === active ? "stay" : "swapped", label, tried };
 		if (result === "closed") {

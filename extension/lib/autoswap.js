@@ -1,8 +1,10 @@
 import {
 	SETTINGS_KEY,
 	classifyLinkPage,
+	isMissingText,
 	linkKey,
 	normalizeSettings,
+	redirectedAway,
 	resolveLink,
 	skipReason,
 	withOptOut,
@@ -19,6 +21,7 @@ const BUSY_RETRIES = 3;
 const handled = new Map();
 const unresolved = new Map();
 const timers = new Map();
+const lastLink = new Map();
 
 let settingsQueue = Promise.resolve();
 
@@ -44,11 +47,11 @@ const showLink = async (tabId, url) => {
 	if (tab && linkKey(tab.url ?? "") !== linkKey(url)) await chrome.tabs.update(tabId, { url });
 };
 
-const swapForTab = serial(async (tabId, url, key) => {
+const swapForTab = serial(async (tabId, url, key, activeMissing = false) => {
 	const settings = await readSettings();
 	const jars = await readJars();
 	const deps = {
-		verdict: () => waitForVerdict(tabId, classifyLinkPage),
+		verdict: () => waitForVerdict(tabId, (page) => classifyLinkPage({ ...page, key })),
 		switchTo: async (label) => (await doSwitch(label)).ok === true,
 		show: () => showLink(tabId, url),
 	};
@@ -57,6 +60,7 @@ const swapForTab = serial(async (tabId, url, key) => {
 		active: await activeLabel(jars),
 		labels: usableLabels(jars),
 		deps,
+		activeMissing,
 	});
 	if (result.outcome === "swapped" || result.outcome === "stay") {
 		if (result.tried.length) await updateSettings((s) => withOwner(s, key, result.label));
@@ -107,11 +111,30 @@ const confirmBanner = (tabId) =>
 		})
 		.catch(() => undefined);
 
+const pageText = async (tabId) => {
+	const [frame] = await chrome.scripting
+		.executeScript({ target: { tabId }, func: () => document.body?.innerText?.slice(0, 4000) ?? "" })
+		.catch(() => []);
+	return typeof frame?.result === "string" ? frame.result : "";
+};
+
+// The tab shows the link itself, or was sent away from it moments ago and says the link was not available.
 const handleTab = async (tabId, attempt = 0) => {
 	const tab = await chrome.tabs.get(tabId).catch(() => null);
 	if (!tab?.url || tab.incognito) return;
-	const key = linkKey(tab.url);
-	if (key === null) return;
+	let key = linkKey(tab.url);
+	let url = tab.url;
+	let activeMissing = false;
+	if (key === null) {
+		const pending = lastLink.get(tabId);
+		if (!redirectedAway({ pending, now: Date.now(), url: tab.url })) return;
+		if (!isMissingText(await pageText(tabId))) {
+			if (attempt < 2) schedule(tabId, 1000, attempt + 1);
+			return;
+		}
+		({ key, url } = pending);
+		activeMissing = true;
+	}
 	const settings = await readSettings();
 	const reason = skipReason({
 		settings,
@@ -128,12 +151,13 @@ const handleTab = async (tabId, attempt = 0) => {
 		return;
 	}
 	if (!settings.confirmed) {
-		await updateSettings((s) => ({ ...s, pending: { key, url: tab.url, at: new Date().toISOString() } }));
+		await updateSettings((s) => ({ ...s, pending: { key, url, at: new Date().toISOString() } }));
 		await confirmBanner(tabId);
 		return;
 	}
 	handled.set(tabId, { key, at: Date.now() });
-	await swapForTab(tabId, tab.url, key).catch(() => undefined);
+	lastLink.delete(tabId);
+	await swapForTab(tabId, url, key, activeMissing).catch(() => undefined);
 };
 
 function schedule(tabId, delay = DEBOUNCE_MS, attempt = 0) {
@@ -149,9 +173,16 @@ function schedule(tabId, delay = DEBOUNCE_MS, attempt = 0) {
 
 export const startAutoSwap = () => {
 	chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
-		if ((change.url || change.status === "complete") && linkKey(tab.url ?? "") !== null) schedule(tabId);
+		const key = linkKey(tab.url ?? "");
+		if (key !== null) {
+			if (change.url) lastLink.set(tabId, { key, url: tab.url, at: Date.now() });
+			if (change.url || change.status === "complete") schedule(tabId);
+		} else if (change.url && redirectedAway({ pending: lastLink.get(tabId), now: Date.now(), url: tab.url })) {
+			schedule(tabId, 800);
+		}
 	});
 	chrome.tabs.onRemoved.addListener((tabId) => {
+		lastLink.delete(tabId);
 		handled.delete(tabId);
 		clearTimeout(timers.get(tabId));
 		timers.delete(tabId);

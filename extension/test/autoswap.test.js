@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
 	MAX_CACHE_ENTRIES,
+	REDIRECT_WINDOW_MS,
+	isMissingText,
+	redirectedAway,
 	SUPPRESS_AFTER_SWITCH_MS,
 	TAB_COOLDOWN_MS,
 	UNRESOLVED_MS,
@@ -218,4 +221,33 @@ test("the manifest still asks only for what auto-swap needs", async () => {
 test("only claude.ai pages may message the extension from outside", async () => {
 	const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
 	assert.deepEqual(manifest.externally_connectable.matches, ["https://claude.ai/*", "https://*.claude.ai/*"]);
+});
+
+test("a link claude.ai sends away to /new counts as missing, a click elsewhere later does not", () => {
+	const pending = { key: "chat/a", url: "https://claude.ai/chat/a", at: 1_000 };
+	assert.equal(redirectedAway({ pending, now: 2_000, url: "https://claude.ai/new" }), true);
+	assert.equal(redirectedAway({ pending, now: 1_000 + REDIRECT_WINDOW_MS, url: "https://claude.ai/new" }), false);
+	assert.equal(redirectedAway({ pending, now: 2_000, url: "https://claude.ai/chat/b" }), false);
+	assert.equal(redirectedAway({ pending, now: 2_000, url: "https://claude.ai/login" }), false);
+	assert.equal(redirectedAway({ pending, now: 2_000, url: "https://example.com/" }), false);
+	assert.equal(redirectedAway({ pending: undefined, now: 2_000, url: "https://claude.ai/new" }), false);
+});
+
+test("the toast text and a redirect away from the link both read as not found", () => {
+	assert.equal(isMissingText("That session is no longer available. Starting a new one."), true);
+	assert.equal(isMissingText("New week, Aaron"), false);
+	const base = { url: "https://claude.ai/new", text: "New week", settled: true };
+	assert.equal(classifyLinkPage({ ...base, key: "chat/a" }), "not-found");
+	assert.equal(classifyLinkPage({ ...base, url: "https://claude.ai/chat/a", key: "chat/a" }), "found");
+	assert.equal(classifyLinkPage({ ...base, key: undefined }), "found");
+});
+
+test("when the active account is already known to miss the link, the others are tried straight away", async () => {
+	const fake = fakeDeps({ owner: "b" });
+	fake.state.current = "a";
+	const result = await resolveLink({ cachedLabel: null, active: "a", labels: ["a", "b"], deps: fake.deps, activeMissing: true });
+	assert.equal(result.outcome, "swapped");
+	assert.equal(result.label, "b");
+	assert.deepEqual(result.tried.map((t) => t.result), ["not-found", "found"]);
+	assert.deepEqual(fake.state.switches, ["b"]);
 });
