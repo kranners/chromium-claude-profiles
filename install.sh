@@ -146,7 +146,7 @@ EXT="$DIR/extension"
 say "Load this folder as an unpacked extension in $BROWSER:"
 say "  $EXT"
 say "  1. Open chrome://extensions   2. Turn on Developer mode   3. Load unpacked, choose the folder above."
-if [ "$DRY" != 1 ]; then
+if [ "$DRY" != 1 ] && [ -t 1 ]; then
 	for clip in pbcopy "xclip -selection clipboard" wl-copy; do
 		if command -v "${clip%% *}" >/dev/null 2>&1; then
 			printf '%s' "$EXT" | $clip 2>/dev/null && say "(the folder path is on your clipboard)"
