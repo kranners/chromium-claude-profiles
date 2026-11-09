@@ -426,7 +426,7 @@ A saved claude.ai account whose session was revoked can only be restored by sign
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Claude Profiles" },
   "externally_connectable": {
-    "matches": ["https://claude.ai/*", "https://*.claude.ai/*", "https://kanban.cute.engineer/*"]
+    "matches": ["https://claude.ai/*", "https://*.claude.ai/*"]
   }
 }
 ```
