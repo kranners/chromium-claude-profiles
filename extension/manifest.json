@@ -34,8 +34,7 @@
   "externally_connectable": {
     "matches": [
       "https://claude.ai/*",
-      "https://*.claude.ai/*",
-      "https://kanban.cute.engineer/*"
+      "https://*.claude.ai/*"
     ]
   },
   "icons": {

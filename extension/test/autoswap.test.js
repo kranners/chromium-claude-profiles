@@ -214,3 +214,8 @@ test("the manifest still asks only for what auto-swap needs", async () => {
 	assert.deepEqual(manifest.host_permissions, ["https://claude.ai/*", "https://*.claude.ai/*"]);
 	assert.equal(manifest.permissions.includes("tabs"), false);
 });
+
+test("only claude.ai pages may message the extension from outside", async () => {
+	const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
+	assert.deepEqual(manifest.externally_connectable.matches, ["https://claude.ai/*", "https://*.claude.ai/*"]);
+});
