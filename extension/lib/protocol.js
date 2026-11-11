@@ -1,7 +1,7 @@
 export const VERSION = "0.1.0";
 export const HOST_NAME = "engineer.cute.claude_profiles";
 export const EXTENSION_ID = "bkgjdpakjigjgdggfcckikppbjjcdkim";
-export const LABEL_PATTERN = /^[A-Za-z0-9 ._@-]{1,64}$/;
+export const LABEL_PATTERN = /^[A-Za-z0-9 ._@+-]{1,64}$/;
 
 export const NATIVE_TYPES = new Set(["ping", "profiles.list"]);
 export const EXTERNAL_TYPES = new Set([...NATIVE_TYPES, "accounts.list", "accounts.switch", "accounts.open"]);

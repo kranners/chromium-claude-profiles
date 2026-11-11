@@ -29,12 +29,8 @@
 		<section>
 			<h1>claude.ai account</h1>
 			<p class="helper">One Chromium for every account: switching changes the claude.ai login in all of this browser's claude.ai tabs. Claude in Chrome keeps its own login.</p>
-			<form id="save-form" class="save">
-				<input id="label" name="label" type="text" placeholder="Label" maxlength="64" required />
-				<button type="submit">Save current</button>
-			</form>
-			<button id="sign-in-another" type="button">Sign in another account</button>
-			<p class="helper">Save the current account first; this signs the tabs out locally without logging the saved session out.</p>
+			<p class="save"><button id="save-current" type="button">Save current</button> <button id="sign-in-another" type="button">Sign in another account</button></p>
+			<p class="helper">Accounts are saved under their email. Signing in another saves the current account first, then signs these tabs out locally without logging the saved session out.</p>
 			<p id="accounts-error" class="error" hidden></p>
 			<button id="relogin" type="button" title="Claude Code drives this browser's Claude in Chrome to sign in by email link" hidden>Sign back in to signed-out accounts</button>
 			<p id="relogin-active" class="relogin" hidden><span id="relogin-pending"></span> <button id="relogin-cancel" type="button" class="link">Cancel</button></p>

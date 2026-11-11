@@ -93,8 +93,8 @@ const dispatch = (req: Request, ctx: Context): Result<object> | Promise<Result<o
 			return openFor(ctx, req.url);
 		case "accounts.save":
 		case "accounts.signIn":
-			return req.type === "accounts.save" && typeof req.label !== "string"
-				? fail("invalid_request", "Name the account")
+			return req.label !== undefined && typeof req.label !== "string"
+				? fail("invalid_request", "label must be a string")
 				: callBridge(bridgeSocket(ctx.home, MAIN_BROWSER), { type: req.type, label: req.label }, 60_000);
 		case "migrate":
 			return migrate(ctx);

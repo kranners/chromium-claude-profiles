@@ -238,3 +238,25 @@ test("migrate moves each old profile's live session into the main browser and ne
 		for (const profile of profiles) await profile.close();
 	}
 });
+
+test("an email with a plus is a saved account's label as it stands", () => {
+	const ctx = tempContext();
+	const plus = { ...summary("Work"), label: "a+work@example.com", email: "a+work@example.com" };
+	assert.deepEqual(writeAccountsStatus(ctx.home, [plus]), { ok: true });
+	const body = JSON.parse(readFileSync(accountsStatusFile(ctx.home), "utf8"));
+	assert.equal(body.accounts[0].label, "a+work@example.com");
+	assert.equal(resolveAccount(toViews([plus], null), "a+work@example.com")?.label, "a+work@example.com");
+});
+
+test("save without a label lets the browser name the account by its email", async () => {
+	const ctx = tempContext();
+	const browser = await fakeBrowser(bridgeSocket(ctx.home, "main"), () => ({ ok: true, account: { label: "a@example.com", email: "a@example.com" } }));
+	try {
+		const saved = await handle({ type: "accounts.save" }, ctx);
+		assert.equal(saved.ok, true);
+		assert.deepEqual(browser.requests, [{ type: "accounts.save" }]);
+		assert.equal((await handle({ type: "accounts.save", label: 3 }, ctx)).ok, false);
+	} finally {
+		await browser.close();
+	}
+});

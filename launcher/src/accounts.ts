@@ -21,7 +21,7 @@ export type AccountView = AccountSummary & { name: string; state: AccountState; 
 
 export const EXPIRING_MS = 3 * 24 * 60 * 60 * 1000;
 const STATUSES = new Set(["ok", "revoked", "unknown"]);
-const LABEL = /^[A-Za-z0-9 ._@-]{1,64}$/;
+const LABEL = /^[A-Za-z0-9 ._@+-]{1,64}$/;
 const EMAIL = /^[^\s@]{1,128}@[^\s@]{1,128}$/;
 const BROWSER_START_MS = 20_000;
 const PROFILE_START_MS = 30_000;

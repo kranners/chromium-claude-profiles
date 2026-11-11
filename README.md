@@ -14,7 +14,7 @@ Claude Profiles saves each account's claude.ai session and swaps between them in
 
 - **A popup** listing your saved accounts with their status (Signed in, Expires soon, Signed out), a Switch button for each, and a toolbar badge counting signed-out accounts.
 - **Auto-swap for links.** Open a claude.ai link to a Claude Code session, chat, project, artifact or shared page, and Claude Profiles finds the saved account that can see it, switches to it and reloads the tab. It remembers the answer, never loops, and has an off switch and a per-link opt-out. See [docs/AUTO_SWAP.md](docs/AUTO_SWAP.md).
-- **The `ccp` command** for scripts and agents: `ccp list`, `ccp status`, `ccp switch <account>`, `ccp launch <account> --url <url>`, `ccp open-for <url>`, `ccp save <label>`, `ccp doctor`.
+- **The `ccp` command** for scripts and agents: `ccp list`, `ccp status`, `ccp switch <account>`, `ccp launch <account> --url <url>`, `ccp open-for <url>`, `ccp save`, `ccp doctor`.
 - **Session checks:** every saved account is checked when you open the popup and once an hour, without switching to it.
 - **Sign back in:** an optional helper that signs expired accounts back in through their emailed login link (see [docs/ONBOARDING.md](docs/ONBOARDING.md)).
 
@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/kranners/chromium-claude-profiles/m
 
 Then load the extension: in your browser open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked** and pick the `extension/` folder inside the checkout (the installer prints the path and copies it to your clipboard). Open the Claude Profiles popup: the Agents line should say `ccp` can reach the browser. Run `ccp doctor` any time to check.
 
-Next, save your accounts: see [docs/ONBOARDING.md](docs/ONBOARDING.md). In short: sign in to claude.ai, run `ccp save personal`; run `ccp sign-in-another`, sign in to the next account, run `ccp save work`; repeat.
+Next, save your accounts: see [docs/ONBOARDING.md](docs/ONBOARDING.md). In short: sign in to claude.ai, run `ccp save`; run `ccp sign-in-another`, sign in to the next account, run `ccp save`; repeat. Each account is saved under its email.
 
 ## Limits, plainly
 
@@ -76,8 +76,8 @@ The extension requests host access to `claude.ai` only, plus the `cookies`, `nat
 ccp doctor [--json]                     check Node, the native host and the extension; say what to do next
 ccp list [--json]                       saved accounts, which is active, last known status
 ccp status [<account>] [--json]         check every saved session now
-ccp save <label>                        save the account signed in now under a label
-ccp sign-in-another                     open the sign-in page for the next account (does not log out)
+ccp save [<label>]                      save the account signed in now under its email (or a label)
+ccp sign-in-another                     save the current account, then open the sign-in page (does not log out)
 ccp launch <account> [--url U]          switch to the account, then open U
 ccp switch <account>                    switch to the account, opening nothing
 ccp open-for <claude.ai url>            open a link in whichever account can see it
@@ -86,7 +86,7 @@ ccp serve [--port N]                    local HTTP API on 127.0.0.1:47321
 ccp install-host [--browser B]          install the native messaging host (B is chromium, chrome or brave)
 ```
 
-`<account>` is a saved account's label, its email, or the short name `ccp list` shows. `ccp add`, `remove` and `env` only apply to the older per-account-profile mode.
+`<account>` is a saved account's email, its label, or the short name `ccp list` shows. `ccp add`, `remove` and `env` only apply to the older per-account-profile mode.
 
 ## Website
 

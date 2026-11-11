@@ -16,7 +16,7 @@ import {
 	listAccounts,
 	onCookieChanged,
 	saveAccount,
-	signInAnotherSaved,
+	signInAnother,
 	startRelogin,
 	switchAccount,
 } from "./lib/jars.js";
@@ -59,9 +59,11 @@ const bridgeHandlers = {
 	"accounts.openFor": (msg) => openFor(msg.url),
 	"accounts.import": (msg) => importAccount(msg.label, msg.cookies),
 	"accounts.save": (msg) => saveAccount(msg.label),
-	"accounts.signIn": () => signInAnotherSaved(),
+	"accounts.signIn": () => signInAnother(),
 	"accounts.exportLive": () => exportLive(),
 };
+
+export { accountHandlers, bridgeHandlers };
 
 export const handleBridge = async (msg) => {
 	if (!isRequest(msg) || !Object.hasOwn(bridgeHandlers, msg.type)) return unsupported(msg?.type);

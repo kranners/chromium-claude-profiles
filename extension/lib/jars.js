@@ -1,4 +1,4 @@
-import { failure, isLabel } from "./protocol.js";
+import { LABEL_PATTERN, failure, isLabel } from "./protocol.js";
 import { sendNative } from "./native.js";
 import { sendBridge } from "./bridge.js";
 
@@ -117,7 +117,7 @@ const accountCookies = async () => (await claudeCookies()).filter((c) => !isInfr
 
 const infraCookies = async () => (await claudeCookies()).filter((c) => isInfraCookie(c.name));
 
-const invalidLabel = () => failure("invalid_request", "Label must match ^[A-Za-z0-9 ._@-]{1,64}$");
+const invalidLabel = () => failure("invalid_request", `Label must match ${LABEL_PATTERN.source}`);
 
 const unknownLabel = (label) => failure("not_found", `No saved account "${label}"`);
 
@@ -157,8 +157,10 @@ const sameEmail = (a, b) => typeof a === "string" && typeof b === "string" && a.
 
 const labelForEmail = (jars, email) =>
 	Object.keys(jars).find((label) => sameEmail(jars[label].email, email)) ??
-	Object.keys(jars).find((label) => sameEmail(label, email)) ??
+	Object.keys(jars).find((label) => !jars[label].email && sameEmail(label, email)) ??
 	null;
+
+export const emailLabel = (email) => email.replace(/[^A-Za-z0-9 ._@+-]/g, "_").slice(0, 64);
 
 const withCheck = (jar, result, checkedAt) => ({
 	...jar,
@@ -209,18 +211,31 @@ const checkAllJars = async () => {
 
 export const checkAccounts = serial(checkAllJars);
 
+const notSignedIn = () => failure("invalid_request", "Not signed in to claude.ai");
+
+const signedOut = () => failure("session_expired", "This claude.ai session is signed out. Sign in again first.");
+
+const hasSession = (cookies) => cookies.some((c) => c.name === SESSION_COOKIE);
+
+const saveLive = async (live, cookies, label) => {
+	const jars = await readJars();
+	const target = labelForEmail(jars, live.email) ?? label ?? emailLabel(live.email);
+	const held = savedJar(jars, target)?.email;
+	if (held && !sameEmail(held, live.email)) return failure("invalid_request", `"${target}" is saved for ${held}; pick another label`);
+	const jar = withCookies(savedJar(jars, target) ?? {}, cookies.map(toSavedCookie), live);
+	await writeJars({ ...jars, [target]: jar });
+	return toAccountSummary(target, jar);
+};
+
 export const saveAccount = serial(async (label) => {
-	if (!isLabel(label)) return invalidLabel();
+	if (label !== undefined && label !== null && label !== "" && !isLabel(label)) return invalidLabel();
 	const cookies = await accountCookies();
-	if (!cookies.some((c) => c.name === SESSION_COOKIE)) {
-		return failure("invalid_request", "Not signed in to claude.ai");
-	}
+	if (!hasSession(cookies)) return notSignedIn();
 	const live = await checkLive();
-	if (live.status === "revoked") return failure("session_expired", "This claude.ai session is signed out. Sign in again first.");
+	if (live.status === "revoked") return signedOut();
 	if (live.status !== "ok") return checkFailed();
-	const jar = withCookies({}, cookies.map(toSavedCookie), live);
-	await writeJars({ ...(await readJars()), [label]: jar });
-	return { ok: true, account: toAccountSummary(label, jar) };
+	const account = await saveLive(live, cookies, label || null);
+	return account.ok === false ? account : { ok: true, account };
 });
 
 const clearAccountCookies = async () => {
@@ -230,9 +245,14 @@ const clearAccountCookies = async () => {
 };
 
 export const signInAnother = serial(async () => {
+	const cookies = await accountCookies();
+	const live = hasSession(cookies) ? await checkLive() : { status: "revoked" };
+	if (live.status === "unknown") return checkFailed();
+	const saved = live.status === "ok" ? await saveLive(live, cookies, null) : null;
+	if (saved?.ok === false) return saved;
 	await clearAccountCookies();
 	await chrome.tabs.create({ url: "https://claude.ai/login" });
-	return { ok: true };
+	return { ok: true, saved };
 });
 
 const replaceAccountCookies = async (cookies) => {
@@ -397,8 +417,7 @@ const captureRelogin = serial(async () => {
 	const email = live.status === "ok" ? live.email.toLowerCase() : null;
 	if (!state.pending.includes(email)) return;
 	const jars = await readJars();
-	const label = labelForEmail(jars, email) ?? email;
-	if (!isLabel(label)) return;
+	const label = labelForEmail(jars, email) ?? emailLabel(email);
 	const cookies = (await accountCookies()).map(toSavedCookie);
 	await writeJars({ ...jars, [label]: withCookies(savedJar(jars, label) ?? {}, cookies, live) });
 	const pending = state.pending.filter((pendingEmail) => pendingEmail !== email);
@@ -578,7 +597,7 @@ const toImportedCookie = (c) =>
 		? toSavedCookie(c)
 		: null;
 
-const importLabel = (label, email) => (isLabel(label) ? label : email.replace(/[^A-Za-z0-9 ._@-]/g, "_").slice(0, 64));
+const importLabel = (label, email) => (isLabel(label) ? label : emailLabel(email));
 
 export const importAccount = serial(async (label, cookies) => {
 	if (!Array.isArray(cookies) || cookies.length === 0 || cookies.length > MAX_IMPORT_COOKIES) {
@@ -600,16 +619,4 @@ export const importAccount = serial(async (label, cookies) => {
 	const current = await readJars();
 	await writeJars({ ...current, [target]: withCookies(savedJar(current, target) ?? {}, saved, result) });
 	return { ok: true, imported: true, label: target, email: result.email };
-});
-
-// Sign-in for agents and the CLI: refuses while the account signed in now is not saved, because
-// opening the login page clears claude.ai's cookies in this browser and that session would be lost.
-export const signInAnotherSaved = serial(async () => {
-	const live = await checkLive();
-	if (live.status === "ok" && labelForEmail(await readJars(), live.email) === null) {
-		return failure("invalid_request", "The account signed in now is not saved. Run ccp save <label> first, or it would be signed out here.");
-	}
-	await clearAccountCookies();
-	await chrome.tabs.create({ url: "https://claude.ai/login" });
-	return { ok: true };
 });

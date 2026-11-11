@@ -57,13 +57,15 @@ const statusChip = (account) => {
 	return element("span", { className: chip.className, textContent: chip.text, title: `${checked}${expires}` });
 };
 
+const aliasText = ({ label, email }) => (email && label.toLowerCase() !== email.toLowerCase() ? `also "${label}", ` : "");
+
 const accountRow = (account) =>
 	element("li", { className: "row" }, [
 		element("span", { className: "identity" }, [
-			element("span", { className: "name" }, [account.label, statusChip(account)]),
+			element("span", { className: "name" }, [account.email ?? account.label, statusChip(account)]),
 			element("span", {
 				className: "meta",
-				textContent: `${account.cookieCount} cookies, saved ${new Date(account.savedAt).toLocaleString()}`,
+				textContent: `${aliasText(account)}${account.cookieCount} cookies, saved ${new Date(account.savedAt).toLocaleString()}`,
 			}),
 		]),
 		button("Switch", () => switchAccount(account.label)),
@@ -136,14 +138,13 @@ const forgetAccount = async (label) => {
 	showMessage("accounts-error", result.ok ? null : result.error.message);
 };
 
-byId("save-form").addEventListener("submit", async (event) => {
-	event.preventDefault();
-	const form = event.currentTarget;
-	const label = String(new FormData(form).get("label") ?? "").trim();
-	const result = await send({ type: "accounts.save", label });
-	showMessage("accounts-error", result.ok ? null : result.error.message);
-	if (result.ok) form.reset();
-});
+byId("save-current").addEventListener(
+	"click",
+	disableWhile(byId("save-current"), async () => {
+		const result = await send({ type: "accounts.save" });
+		showMessage("accounts-error", result.ok ? null : result.error.message);
+	}),
+);
 
 byId("relogin").addEventListener(
 	"click",
@@ -166,10 +167,13 @@ chrome.storage.onChanged.addListener((changes) => {
 
 byId("reload").addEventListener("click", () => chrome.runtime.reload());
 
-byId("sign-in-another").addEventListener("click", async () => {
-	const result = await send({ type: "accounts.signIn" });
-	showMessage("accounts-error", result.ok ? null : result.error.message);
-});
+byId("sign-in-another").addEventListener(
+	"click",
+	disableWhile(byId("sign-in-another"), async () => {
+		const result = await send({ type: "accounts.signIn" });
+		showMessage("accounts-error", result.ok ? null : result.error.message);
+	}),
+);
 
 renderAccounts().then(checkAccounts);
 showBridge();

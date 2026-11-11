@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	classifyPage,
+	emailLabel,
 	exportLive,
 	importAccount,
 	isClaudeUrl,
 	isSignedOut,
 	openAccount,
+	saveAccount,
 	sessionExpiresAt,
+	signInAnother,
 	toReport,
 	toSavedCookie,
 } from "../lib/jars.js";
@@ -37,7 +40,7 @@ const jarOf = (session, email) => ({
 
 const response = (status, body = {}) => ({ status, headers: new Headers(), json: async () => body });
 
-const emails = { A: "a@example.com", B: "b@example.com", FRESH: "b@example.com" };
+const emails = { A: "a@example.com", B: "b@example.com", FRESH: "b@example.com", PLUS: "a+work@example.com" };
 
 const mockBrowser = (live, jars) => {
 	let cookies = [cookie("sessionKey", live)];
@@ -81,7 +84,12 @@ const mockBrowser = (live, jars) => {
 		const session = header?.match(/sessionKey=(\w+)/)?.[1];
 		return emails[session] ? response(200, { email_address: emails[session] }) : response(401);
 	};
-	return { jars: () => jars, live: () => cookies.find((c) => c.name === "sessionKey")?.value, created };
+	return {
+		jars: () => jars,
+		live: () => cookies.find((c) => c.name === "sessionKey")?.value,
+		signIn: async (session) => chrome.cookies.set({ name: "sessionKey", value: session }),
+		created,
+	};
 };
 
 const restore = () => {
@@ -164,6 +172,62 @@ test("exportLive hands over the live session only while it is signed in", async 
 	mockBrowser("GONE", {});
 	try {
 		assert.equal((await exportLive()).error.code, "session_expired");
+	} finally {
+		restore();
+	}
+});
+
+test("saving labels the account with its email, and updates the saved account that already has that email", async () => {
+	const browser = mockBrowser("B", { "piggy-main": jarOf("OLD", "a@example.com") });
+	try {
+		const fresh = await saveAccount();
+		assert.deepEqual([fresh.ok, fresh.account.label, fresh.account.email], [true, "b@example.com", "b@example.com"]);
+		assert.equal(JSON.stringify(fresh).includes("sessionKey"), false);
+		await signInAnother();
+		await browser.signIn("A");
+		const existing = await saveAccount();
+		assert.equal(existing.account.label, "piggy-main");
+		assert.deepEqual(Object.keys(browser.jars()).sort(), ["b@example.com", "piggy-main"]);
+		assert.equal(browser.jars()["piggy-main"].cookies[0].value, "A");
+		assert.equal((await openAccount("piggy-main", null)).email, "a@example.com");
+	} finally {
+		restore();
+	}
+});
+
+test("an address with a plus is a label as it stands", async () => {
+	mockBrowser("PLUS", {});
+	try {
+		assert.equal(emailLabel("a+work@example.com"), "a+work@example.com");
+		assert.equal((await saveAccount()).account.label, "a+work@example.com");
+		assert.equal(emailLabel("o'neil@example.com"), "o_neil@example.com");
+	} finally {
+		restore();
+	}
+});
+
+test("signing in another saves the account signed in now first, then opens the sign-in page", async () => {
+	const browser = mockBrowser("A", {});
+	try {
+		const result = await signInAnother();
+		assert.deepEqual([result.ok, result.saved.label], [true, "a@example.com"]);
+		assert.equal(browser.jars()["a@example.com"].cookies[0].value, "A");
+		assert.equal(browser.live(), undefined);
+		assert.deepEqual(browser.created.map((tab) => tab.url), ["https://claude.ai/login"]);
+		const signedOut = await signInAnother();
+		assert.deepEqual([signedOut.ok, signedOut.saved], [true, null]);
+	} finally {
+		restore();
+	}
+});
+
+test("saving never overwrites a saved account that holds another email", async () => {
+	const browser = mockBrowser("B", { "a@example.com": jarOf("A", "a@example.com") });
+	try {
+		assert.equal((await saveAccount("a@example.com")).error.code, "invalid_request");
+		assert.equal((await signInAnother()).ok, true);
+		assert.equal(browser.jars()["a@example.com"].cookies[0].value, "A");
+		assert.equal(browser.jars()["b@example.com"].cookies[0].value, "B");
 	} finally {
 		restore();
 	}

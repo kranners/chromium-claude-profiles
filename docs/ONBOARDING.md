@@ -12,26 +12,26 @@ A step-by-step guide to getting every one of your Claude accounts into Claude Pr
 
 1. Go to <https://claude.ai> in this Chromium and sign in to your first account.
 2. Open the Claude Profiles popup (puzzle-piece menu, then Claude Profiles; pin it if you like).
-3. Type a short label such as `personal` and press **Save current**.
+3. Press **Save current**. The account is saved under its email.
 4. The account appears in the list with a green **Signed in** chip.
 
 ## Add each further account
 
-1. In the popup press **Sign in another account**. This clears the claude.ai cookies from the browser *locally*; it does not log the saved account out.
-2. Your claude.ai tabs reload to the sign-in page. Sign in to the next account.
-3. Open the popup, type a label and press **Save current**.
+1. In the popup press **Sign in another account**. This saves the account signed in now under its email, then clears the claude.ai cookies from the browser *locally*; it does not log the saved account out.
+2. A claude.ai sign-in page opens. Sign in to the next account.
+3. Open the popup and press **Save current**.
 4. Repeat for each account.
 
 ### The same thing from a terminal
 
 ```sh
-ccp save personal            # claude.ai is signed in to the first account
-ccp sign-in-another          # opens the sign-in page; sign in to the next account
-ccp save work
+ccp save                     # claude.ai is signed in to the first account; saved under its email
+ccp sign-in-another          # saves the current account, opens the sign-in page; sign in to the next account
+ccp save
 ccp list
 ```
 
-`ccp sign-in-another` refuses while the account signed in now is not saved, so you cannot lose a session by accident. A coding agent can drive exactly this; it is what the install prompt does.
+`ccp sign-in-another` saves the account signed in now before it clears anything, so you cannot lose a session by accident. `ccp save <label>` still works and names a new account `<label>`, but an account whose email is already saved is updated under its existing label. A coding agent can drive exactly this; it is what the install prompt does.
 
 > **Never use claude.ai's own "Log out" button on a saved account.** Logging out revokes the session on Anthropic's servers, so the saved copy stops working and you would have to sign in again. Always use **Sign in another account** or **Switch**.
 
@@ -42,7 +42,7 @@ Once you have two or more accounts saved, opening a claude.ai link to a Claude C
 ## Switch accounts
 
 - From the popup: press **Switch** next to an account. Your claude.ai tabs reload into it.
-- From a terminal: `ccp switch <label>`.
+- From a terminal: `ccp switch <email>` (or an older account's label).
 - Open a link under the right account: `ccp open-for <claude.ai url>` tries the active account first and then each other saved account, and keeps the first one whose page loads rather than saying "couldn't be found" or sending you to sign in. If none can see it, it closes its tab, switches back and tells you.
 
 Check what you have with `ccp list` (saved accounts and which is active) or `ccp status` (checks every session now).
@@ -51,7 +51,7 @@ Check what you have with `ccp list` (saved accounts and which is active) or `ccp
 
 - Each account shows **Signed in**, **Expires soon** (within 3 days of the session cookie expiring), **Signed out**, or **Couldn't check**.
 - The toolbar badge counts signed-out accounts.
-- When an account is **Signed out**, switch to it and sign in again (or use the helper below), then press **Save current** with the same label.
+- When an account is **Signed out**, switch to it and sign in again (or use the helper below), then press **Save current**; it updates the saved account with that email.
 
 ### Optional: automatic sign back in
 

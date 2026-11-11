@@ -146,11 +146,6 @@ h1 {
 	margin-bottom: 8px;
 }
 
-.save input {
-	flex: 1;
-	min-width: 0;
-}
-
 .error {
 	color: var(--error);
 	margin: 0 0 8px;

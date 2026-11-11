@@ -59,10 +59,10 @@ export const diagnose = (i: DoctorInputs): Diagnosis => {
 	const count = i.accounts?.count ?? 0;
 	const next =
 		count === 0
-			? "Sign in to claude.ai in the browser, then run: ccp save <label> (a short name such as personal or work)."
+			? "Sign in to claude.ai in the browser, then run: ccp save (it is saved under its email)."
 			: i.accounts && i.accounts.signedOut > 0
-				? "Some saved accounts are signed out; open the Claude Profiles popup and use Sign back in, or sign in and run ccp save <label> again."
-				: "Ready. To add another account: ccp sign-in-another, sign in in the browser, then ccp save <label>.";
+				? "Some saved accounts are signed out; open the Claude Profiles popup and use Sign back in, or sign in and run ccp save again."
+				: "Ready. To add another account: ccp sign-in-another, sign in in the browser, then ccp save.";
 	return { ready: true, checks, next };
 };
 

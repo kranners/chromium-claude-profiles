@@ -84,7 +84,7 @@ footer{padding:36px 0 50px;color:var(--mute);font-size:14px;border-top:1px solid
       <h4>Agents</h4>
       <p class="agents">ccp can reach this browser (launcher answered in 4 ms)</p>
       <h4>claude.ai account</h4>
-      <div class="save"><span>Label</span><span class="sw" style="flex:none">Save current</span></div>
+      <div class="save"><span class="sw" style="flex:none">Save current</span></div>
       <div class="row"><div class="name">Personal<small>alex@example.com</small></div><span class="chip">Signed in</span><span class="sw on">Active</span></div>
       <div class="row"><div class="name">Work<small>alex@example.org</small></div><span class="chip amber">Expires soon</span><span class="sw">Switch</span></div>
       <div class="row"><div class="name">Spare<small>alex.spare@example.net</small></div><span class="chip red">Signed out</span><span class="sw">Switch</span></div>
@@ -118,7 +118,7 @@ footer{padding:36px 0 50px;color:var(--mute);font-size:14px;border-top:1px solid
       <rect x="230" y="188" width="180" height="46" rx="12" fill="#F6DCC4"/><text x="320" y="216" text-anchor="middle" font-size="14" fill="#3B2A22" font-family="Helvetica,Arial">claude.ai tabs reload</text>
     </svg>
     <ol class="steps" style="margin:0">
-      <li><div><strong>Save</strong><br>Sign in once, name the account, press Save current.</div></li>
+      <li><div><strong>Save</strong><br>Sign in once, press Save current. It is saved under its email.</div></li>
       <li><div><strong>Switch</strong><br>The extension swaps the claude.ai cookies and checks the new session. A revoked session rolls back, so you are never left half signed in.</div></li>
       <li><div><strong>Reload</strong><br>Every claude.ai tab reloads into the account you picked.</div></li>
     </ol>
@@ -150,7 +150,7 @@ Read https://github.com/kranners/chromium-claude-profiles/blob/main/INSTALL_PROM
   <p class="note" style="margin-top:14px">Prefer to do it yourself? <a href="https://github.com/kranners/chromium-claude-profiles#install-in-about-60-seconds">Manual install steps</a> are in the README.</p>
   <ol class="steps" style="margin-top:26px">
     <li><div>Load the extension: in your browser open <code>chrome://extensions</code>, turn on Developer mode, choose Load unpacked, pick the <code>extension/</code> folder.</div></li>
-    <li><div>Sign in to claude.ai, open Claude Profiles, type a label and press Save current.</div></li>
+    <li><div>Sign in to claude.ai, open Claude Profiles, and press Save current.</div></li>
     <li><div>Run <code>ccp sign-in-another</code> (or press "Sign in another account"), sign in to the next one, and save it with <code>ccp save</code>. Repeat. See the <a href="https://github.com/kranners/chromium-claude-profiles/blob/main/docs/ONBOARDING.md">onboarding guide</a>.</div></li>
   </ol>
 </div></section>
@@ -170,7 +170,7 @@ Read https://github.com/kranners/chromium-claude-profiles/blob/main/INSTALL_PROM
   <details><summary>Can I use two accounts at the same time?</summary><p>No. Chromium keeps cookies per profile, not per tab, so one claude.ai account is active in the browser at a time. A switch reloads your claude.ai tabs, so finish your message first.</p></details>
   <details><summary>Does it change my Claude in Chrome login?</summary><p>No. It swaps the claude.ai website session only. The Claude in Chrome extension keeps its own login.</p></details>
   <details><summary>Should I log out of an account in claude.ai?</summary><p>Never log out of a saved account: logging out revokes the session and the saved copy stops working. Use "Sign in another account" in the popup instead.</p></details>
-  <details><summary>An account says "Signed out". What now?</summary><p>Switch to the browser's current account, use "Sign in another account", sign in to the one that expired and save it under the same label. The <a href="https://github.com/kranners/chromium-claude-profiles/blob/main/docs/TROUBLESHOOTING.md">troubleshooting guide</a> has more.</p></details>
+  <details><summary>An account says "Signed out". What now?</summary><p>Switch to the browser's current account, use "Sign in another account", sign in to the one that expired and press Save current. The <a href="https://github.com/kranners/chromium-claude-profiles/blob/main/docs/TROUBLESHOOTING.md">troubleshooting guide</a> has more.</p></details>
   <details><summary>Does it work on Windows or Linux, or in Chrome?</summary><p>macOS and Linux with Chromium, Google Chrome or Brave. Windows is not supported.</p></details>
   <details><summary>Is this from Anthropic?</summary><p>No. Claude Profiles is an independent, unofficial open-source project. See the note below.</p></details>
 </div></section>

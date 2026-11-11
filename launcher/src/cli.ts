@@ -20,7 +20,7 @@ const USAGE = `usage:
   ccp switch <account> [--json]
   ccp open-for <claude.ai url> [--json]
   ccp migrate [--json]
-  ccp save <label> [--json]
+  ccp save [<label>] [--json]
   ccp sign-in-another [--json]
   ccp doctor [--json]
   ccp add <name> [--email E] [--config-dir D] [--json]      (old per-account profiles)
@@ -232,7 +232,7 @@ const serve = async (args: string[]): Promise<number> => {
 };
 
 const saveCommand = async (args: string[]): Promise<number> => {
-	const { values, positionals } = parse(args, JSON_FLAG, { min: 1, max: 1 });
+	const { values, positionals } = parse(args, JSON_FLAG, { min: 0, max: 1 });
 	const result = await handle({ type: "accounts.save", label: positionals[0] }, context());
 	return report(result, values.json === true, (ok) => {
 		const account = ok.account as { label: string; email: string | null };
@@ -243,7 +243,10 @@ const saveCommand = async (args: string[]): Promise<number> => {
 const signInAnotherCommand = async (args: string[]): Promise<number> => {
 	const { values } = parse(args, JSON_FLAG, { min: 0, max: 0 });
 	const result = await handle({ type: "accounts.signIn" }, context());
-	return report(result, values.json === true, () => "Opened the claude.ai sign-in page. Sign in there, then run: ccp save <label>\n");
+	return report(result, values.json === true, (ok) => {
+		const saved = ok.saved as { label: string } | null;
+		return `${saved ? `Saved ${saved.label} first. ` : ""}Opened the claude.ai sign-in page. Sign in there, then run: ccp save\n`;
+	});
 };
 
 const doctor = async (args: string[]): Promise<number> => {

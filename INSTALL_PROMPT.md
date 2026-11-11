@@ -33,14 +33,14 @@ You are installing Claude Profiles for the user. Follow these steps in order and
    - Any other failure: show the user the last lines of output and stop.
 2. **Load the extension.** Tell the user, in their browser (the one named in the output): open `chrome://extensions`, switch on Developer mode (top right), choose Load unpacked, and pick the folder the installer printed (its path is already on their clipboard). They should keep the browser open. Wait for them to say it is done.
 3. **Check.** Run `ccp doctor` (use `~/.local/bin/ccp doctor` if `ccp` is not on PATH). If it says the extension is not connected, ask the user to press Reload extension in the Claude Profiles popup (the toolbar icon, under the puzzle-piece menu if hidden) and run it again. Repeat until its checks all say `ok`.
-4. **Save each account.** Ask the user which Claude accounts they use and what short label they want for each (for example `personal`, `work`). Run `ccp list` first to see what is already saved.
-   - For the account signed in right now: ask the user to confirm that claude.ai is open and signed in to the account they name, then run `ccp save <label>`.
-   - For each further account: run `ccp sign-in-another` (it opens the claude.ai sign-in page and only clears the local session, it does not log out), ask the user to sign in to the next account in the browser and tell you when done, then run `ccp save <label>`. If it refuses because the current account is not saved yet, run `ccp save` for that one first.
+4. **Save each account.** Ask the user which Claude accounts they use. Each is saved under its email. Run `ccp list` first to see what is already saved.
+   - For the account signed in right now: ask the user to confirm that claude.ai is open and signed in to the account they name, then run `ccp save`.
+   - For each further account: run `ccp sign-in-another` (it saves the current account, opens the claude.ai sign-in page and only clears the local session, it does not log out), ask the user to sign in to the next account in the browser and tell you when done, then run `ccp save`.
    - After each save run `ccp list` and confirm the new account shows as signed in.
 5. **Finish.** Run `ccp list` once more and tell the user which accounts are saved. Then tell them:
    - Auto-swap is built in. The first time they open a claude.ai link that belongs to one account while another is active, a small banner on the page asks them to turn it on once. After that, links to code sessions, chats, projects, artifacts and shared pages open in the right account on their own.
    - Only one claude.ai account is active in the browser at a time, and switching reloads every open claude.ai tab.
    - They can turn auto-swap off, or exclude one link, in the Claude Profiles popup.
-   - If an account shows as signed out later, they sign in to it again and run `ccp save <label>` with the same label.
+   - If an account shows as signed out later, they sign in to it again and run `ccp save`.
 
 If anything fails and you cannot fix it with the steps above, show the user the output of `ccp doctor` and stop. Do not improvise changes to their browser or system.

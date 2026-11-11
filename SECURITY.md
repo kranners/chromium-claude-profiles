@@ -13,7 +13,7 @@ Claude Profiles stores the claude.ai session cookies of the accounts you save. T
 - Cookie values, the token and OAuth tokens are never logged, printed or returned, apart from the one-off `ccp migrate` import, which moves cookies between old profiles and the main browser through the local sockets.
 - `accounts.json`, read by monitors, holds labels, emails, states and expiry times only.
 - Auto-swap remembers only which of your own account labels owns which claude.ai link (kind and id), in the extension's storage. It requests no extra permission, and the confirmation banner it may inject into a claude.ai tab can send exactly one message, "turn auto-swap on or off".
-- `ccp` can ask the extension to save the account that is signed in now and to open the sign-in page. It cannot read a cookie out, and sign-in refuses while the current account is unsaved, so nothing is signed out by accident.
+- `ccp` can ask the extension to save the account that is signed in now and to open the sign-in page. It cannot read a cookie out, and sign-in saves the account signed in now before it clears anything, refusing when it cannot check that session, so nothing is signed out by accident.
 - Child processes are started with argument arrays and, for sign-back-in, a restricted environment.
 
 ## Things to know

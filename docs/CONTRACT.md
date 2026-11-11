@@ -447,13 +447,14 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 | `accounts.check` | jars → probes every jar, same body as `accounts.list` | yes | no |
 | `accounts.relogin` | jars → native `relogin.start` → `{ok:true, started, order?, skipped?, driver?, message?}` | yes | no |
 | `accounts.reloginCancel` | jars → same body as `accounts.list`, with `relogin: null` | yes | no |
-| `accounts.save` `{label}` | jars → `{ok:true, account:{label,savedAt,cookieCount,email,status,checkedAt}}` | yes | **no** |
+| `accounts.save` `{label?}` | jars → `{ok:true, account:{label,savedAt,cookieCount,email,status,checkedAt}}`; saved into the jar that already has the live email, else under `label`, else the email made label-safe | yes | **no** |
+| `accounts.signIn` | jars → saves the live account as `accounts.save` does (when signed in), clears claude.ai cookies, opens claude.ai/login → `{ok:true, saved: summary \| null}`; `unknown` live check → error, nothing cleared | yes | **no** |
 | `accounts.switch` `{label}` | jars → `{ok:true, reloadedTabs:number}` | yes | yes |
 | `accounts.forget` `{label}` | jars → `{ok:true}` | yes | **no** |
 
 - A disallowed external type gets `unsupported`.
 - If `chrome.runtime.lastError` is set during native messaging, the reply is `{ok:false, error:{code:"native_host_unavailable", message:"Run: ccp install-host"}}`.
-- Labels match `^[A-Za-z0-9 ._@-]{1,64}$`.
+- Labels match `^[A-Za-z0-9 ._@+-]{1,64}$`. An email becomes a label with any other character replaced by `_`, cut to 64.
 
 ### 5.3 Cookie jars (`lib/jars.js`)
 
@@ -518,7 +519,7 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 
 - **Agents section** (v0.3, replaces the Profiles section): one line saying whether `ccp` can reach this browser (`bridge.status`), the launcher's ping time, and an error from the native host inline (e.g. "Run: ccp install-host").
 - **claude.ai tab account section:**
-  - a label input with a "Save current" button;
+  - "Save current", which saves the signed-in account under its email (no label to type), and "Sign in another account", which saves the signed-in account the same way, clears the claude.ai cookies and opens claude.ai/login;
   - a list of saved jars, each with "Switch" and "Forget" buttons;
   - fixed helper text: "One Chromium for every account: switching changes the claude.ai login in all of this browser's claude.ai tabs. Claude in Chrome keeps its own login."
   - each jar shows a status chip: "Signed in", "Expires soon" (amber, within 3 days of `sessionExpiresAt`), "Signed out" (red, revoked or expired), or "Unchecked" / "Couldn't check" (muted), titled with the check and expiry times; the cached list renders first, then `accounts.check` re-renders it;

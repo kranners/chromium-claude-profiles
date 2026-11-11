@@ -18,7 +18,7 @@ Chromium keeps serving an unpacked extension's old service worker across restart
 
 ## A switch fails and leaves me on the previous account
 
-A saved account whose session has been revoked cannot be switched to. The extension rolls the cookies back so you stay where you were. This almost always means the account was logged out in claude.ai. The account will show **Signed out**: switch to the browser's current account, use **Sign in another account**, sign in to the broken one and press **Save current** with the same label.
+A saved account whose session has been revoked cannot be switched to. The extension rolls the cookies back so you stay where you were. This almost always means the account was logged out in claude.ai. The account will show **Signed out**: switch to the browser's current account, use **Sign in another account**, sign in to the broken one and press **Save current**, which updates the saved account with that email.
 
 ## An account shows "Signed out" but I did not log out
 
