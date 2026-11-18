@@ -1,0 +1,1 @@
+Change 20261118-172649-2600820: profile jars hold claude.com (Console) cookies too; switch clears and restores them, reloads claude.com tabs; ccp list --json shows consoleJar.
