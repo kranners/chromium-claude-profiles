@@ -14,12 +14,12 @@ ccp / agent  ->  main.sock  ->  native host  ->  extension  ->  chrome.cookies
 
 ## An account is a cookie jar
 
-Saving an account copies its claude.ai cookies (except Cloudflare's, which are tied to the browser and IP) into the extension's `chrome.storage.local`, along with the account's email and last check result.
+Saving an account copies its claude.ai and claude.com (Anthropic Console) cookies (except Cloudflare's, which are tied to the browser and IP) into the extension's `chrome.storage.local`, along with the account's email and last check result.
 
 **Switching** does this, in a queue so only one switch runs at a time:
 
 1. Check the outgoing session, and write its current cookies back into its jar so refreshed session keys are not lost.
-2. Remove the claude.ai cookies, then set the saved ones.
+2. Remove the claude.ai and claude.com cookies, then set the saved ones. An account with no Console cookies saved leaves the Console signed out.
 3. Check the new session. If it is revoked, put the old cookies back and report the failure.
 4. Reload every claude.ai tab.
 
@@ -43,7 +43,7 @@ The service worker watches tab updates for claude.ai addresses of the form `/cha
 
 ## Why each permission
 
-- `cookies`, host access to `claude.ai`: read and set the session cookies.
+- `cookies`, host access to `claude.ai` and `claude.com`: read and set the claude.ai and Console session cookies, and reload Console tabs after a switch.
 - `storage`: keep the saved jars.
 - `nativeMessaging`: talk to `ccp`.
 - `offscreen`: keep the extension's process warm so the popup opens instantly.

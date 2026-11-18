@@ -11,13 +11,39 @@ const SIGN_IN_SETTLE_MS = 10_000;
 const RELOGIN_EXPIRE_ALARM = "relogin-expire";
 const BADGE_COLOR = "#b3261e";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const COOKIE_DOMAIN = "claude.ai";
+const SESSION_DOMAIN = "claude.ai";
+export const COOKIE_DOMAINS = [SESSION_DOMAIN, "claude.com"];
+const CONSOLE_OWNER_KEY = "consoleOwner";
+const CONSOLE_CLEARED = "*cleared*";
 const SESSION_COOKIE = "sessionKey";
 const ACCOUNT_URL = "https://claude.ai/api/account";
-const CLAUDE_TAB_PATTERNS = ["https://claude.ai/*", "https://*.claude.ai/*"];
+const tabPatterns = (domains) => domains.flatMap((domain) => [`https://${domain}/*`, `https://*.${domain}/*`]);
+const CLAUDE_TAB_PATTERNS = tabPatterns([SESSION_DOMAIN]);
+const RELOAD_TAB_PATTERNS = tabPatterns(COOKIE_DOMAINS);
 const INFRA_COOKIES = new Set(["__cf_bm", "cf_clearance", "_cfuvid", "__cflb"]);
 
 export const isInfraCookie = (name) => INFRA_COOKIES.has(name);
+
+export const cookieDomainOf = (cookie) => {
+	if (typeof cookie?.domain !== "string") return null;
+	const host = cookie.domain.replace(/^\./, "");
+	return COOKIE_DOMAINS.find((domain) => host === domain || host.endsWith(`.${domain}`)) ?? null;
+};
+
+export const isSessionCookie = (cookie) => cookieDomainOf(cookie) === SESSION_DOMAIN;
+
+const sessionCookiesOf = (cookies) => (Array.isArray(cookies) ? cookies : []).filter(isSessionCookie);
+
+const consoleCookiesOf = (cookies) => (Array.isArray(cookies) ? cookies : []).filter((cookie) => !isSessionCookie(cookie));
+
+// The live Console cookies are a label's only when a switch put that label's jar there, or the extension cleared them and someone signed in since.
+export const ownsConsole = (owner, label, captured) =>
+	owner === label || (owner === CONSOLE_CLEARED && consoleCookiesOf(captured).length > 0);
+
+export const capturedCookies = (jar, captured, owned) => [
+	...sessionCookiesOf(captured),
+	...consoleCookiesOf(owned ? captured : jar?.cookies),
+];
 
 export const cookieUrl = ({ domain, path }) => `https://${domain.replace(/^\./, "")}${path}`;
 
@@ -46,7 +72,7 @@ export const toSetDetails = (saved) => ({
 });
 
 export const sessionExpiresAt = (cookies) => {
-	const seconds = (Array.isArray(cookies) ? cookies : []).find((c) => c?.name === SESSION_COOKIE)?.expirationDate;
+	const seconds = sessionCookiesOf(cookies).find((c) => c.name === SESSION_COOKIE)?.expirationDate;
 	return typeof seconds === "number" && Number.isFinite(seconds) ? new Date(seconds * 1000).toISOString() : null;
 };
 
@@ -58,6 +84,7 @@ export const toAccountSummary = (label, jar) => ({
 	status: jar.check?.status ?? null,
 	checkedAt: jar.check?.checkedAt ?? null,
 	sessionExpiresAt: sessionExpiresAt(jar.cookies),
+	consoleJar: consoleCookiesOf(jar.cookies).length > 0,
 });
 
 export const isSignedOut = (summary, now = Date.now()) =>
@@ -69,6 +96,7 @@ export const toReport = (summary) => ({
 	status: summary.status,
 	checkedAt: summary.checkedAt,
 	sessionExpiresAt: summary.sessionExpiresAt,
+	consoleJar: summary.consoleJar,
 });
 
 export const classifyAccountResponse = ({ status, cfMitigated, email }) => {
@@ -111,11 +139,24 @@ const writeJars = async (jars) => {
 	reportJars(jars);
 };
 
-const claudeCookies = () => chrome.cookies.getAll({ domain: COOKIE_DOMAIN });
+const cookiesOn = async (domain) => (await chrome.cookies.getAll({ domain })).filter((c) => cookieDomainOf(c) === domain);
 
-const accountCookies = async () => (await claudeCookies()).filter((c) => !isInfraCookie(c.name));
+const accountCookies = async () => (await Promise.all(COOKIE_DOMAINS.map(cookiesOn))).flat().filter((c) => !isInfraCookie(c.name));
 
-const infraCookies = async () => (await claudeCookies()).filter((c) => isInfraCookie(c.name));
+const infraCookies = async () => (await cookiesOn(SESSION_DOMAIN)).filter((c) => isInfraCookie(c.name));
+
+const readConsoleOwner = async () => (await chrome.storage.local.get(CONSOLE_OWNER_KEY))[CONSOLE_OWNER_KEY] ?? null;
+
+const writeConsoleOwner = (owner) => chrome.storage.local.set({ [CONSOLE_OWNER_KEY]: owner ?? null });
+
+const heldBySameAccount = (jar, result) => (!jar.email || sameEmail(jar.email, result.email) ? jar : {});
+
+const capturedJar = (jar, label, cookies, owner, result) =>
+	withCookies(jar, capturedCookies(heldBySameAccount(jar, result), cookies, ownsConsole(owner, label, cookies)), result);
+
+const claimClearedConsole = async (owner, label, cookies) => {
+	if (owner === CONSOLE_CLEARED && ownsConsole(owner, label, cookies)) await writeConsoleOwner(label);
+};
 
 const invalidLabel = () => failure("invalid_request", `Label must match ${LABEL_PATTERN.source}`);
 
@@ -144,7 +185,7 @@ let probeId = Date.now() % 1e6;
 
 const checkJar = async (jar) => {
 	const id = ++probeId;
-	const header = cookieHeader([...jar.cookies, ...(await infraCookies())]);
+	const header = cookieHeader([...sessionCookiesOf(jar.cookies), ...(await infraCookies())]);
 	await chrome.declarativeNetRequest.updateSessionRules({ addRules: [probeRule(id, chrome.runtime.id, header)] });
 	try {
 		return await fetchAccount(probeUrl(id), "omit");
@@ -215,15 +256,18 @@ const notSignedIn = () => failure("invalid_request", "Not signed in to claude.ai
 
 const signedOut = () => failure("session_expired", "This claude.ai session is signed out. Sign in again first.");
 
-const hasSession = (cookies) => cookies.some((c) => c.name === SESSION_COOKIE);
+const hasSession = (cookies) => sessionCookiesOf(cookies).some((c) => c.name === SESSION_COOKIE);
 
 const saveLive = async (live, cookies, label) => {
 	const jars = await readJars();
 	const target = labelForEmail(jars, live.email) ?? label ?? emailLabel(live.email);
 	const held = savedJar(jars, target)?.email;
 	if (held && !sameEmail(held, live.email)) return failure("invalid_request", `"${target}" is saved for ${held}; pick another label`);
-	const jar = withCookies(savedJar(jars, target) ?? {}, cookies.map(toSavedCookie), live);
+	const saved = cookies.map(toSavedCookie);
+	const owner = await readConsoleOwner();
+	const jar = capturedJar(savedJar(jars, target) ?? {}, target, saved, owner, live);
 	await writeJars({ ...jars, [target]: jar });
+	await claimClearedConsole(owner, target, saved);
 	return toAccountSummary(target, jar);
 };
 
@@ -242,6 +286,7 @@ const clearAccountCookies = async () => {
 	for (const c of await accountCookies()) {
 		await chrome.cookies.remove({ url: cookieUrl(c), name: c.name, storeId: c.storeId });
 	}
+	await writeConsoleOwner(CONSOLE_CLEARED);
 };
 
 export const signInAnother = serial(async () => {
@@ -255,15 +300,16 @@ export const signInAnother = serial(async () => {
 	return { ok: true, saved };
 });
 
-const replaceAccountCookies = async (cookies) => {
+const replaceAccountCookies = async (cookies, owner) => {
 	await clearAccountCookies();
 	for (const saved of cookies) {
 		await chrome.cookies.set(toSetDetails(saved));
 	}
+	await writeConsoleOwner(owner);
 };
 
 const reloadClaudeTabs = async () => {
-	const tabs = await chrome.tabs.query({ url: CLAUDE_TAB_PATTERNS });
+	const tabs = await chrome.tabs.query({ url: RELOAD_TAB_PATTERNS });
 	await Promise.all(tabs.map((tab) => chrome.tabs.reload(tab.id)));
 	return tabs.length;
 };
@@ -273,10 +319,10 @@ const updateJar = async (label, update) => {
 	if (savedJar(jars, label)) await writeJars({ ...jars, [label]: update(jars[label]) });
 };
 
-const keepOutgoingSession = async (outgoing, cookies) => {
+const keepOutgoingSession = async (outgoing, cookies, owner) => {
 	if (outgoing.status !== "ok") return;
 	const label = labelForEmail(await readJars(), outgoing.email);
-	if (label !== null) await updateJar(label, (jar) => withCookies(jar, cookies, outgoing));
+	if (label !== null) await updateJar(label, (jar) => capturedJar(jar, label, cookies, owner, outgoing));
 };
 
 export const doSwitch = async (label) => {
@@ -285,16 +331,17 @@ export const doSwitch = async (label) => {
 	const jar = savedJar(await readJars(), label);
 	if (!Array.isArray(jar?.cookies)) return unknownLabel(label);
 	const previous = (await accountCookies()).map(toSavedCookie);
+	const previousOwner = await readConsoleOwner();
 	const outgoing = await checkLive();
-	const result = await replaceAccountCookies(jar.cookies).then(checkLive).catch(unknownResult);
+	const result = await replaceAccountCookies(jar.cookies, label).then(checkLive).catch(unknownResult);
 	if (result.status !== "ok") {
-		await replaceAccountCookies(previous);
+		await replaceAccountCookies(previous, previousOwner);
 		if (result.status !== "revoked") return checkFailed();
 		await updateJar(label, (saved) => withCheck(saved, result, new Date().toISOString()));
 		return failure("session_expired", `The saved session for "${label}" is no longer valid. Sign in to it again and re-save it.`);
 	}
 	await updateJar(label, (saved) => withCheck(saved, result, new Date().toISOString()));
-	await keepOutgoingSession(outgoing, previous);
+	await keepOutgoingSession(outgoing, previous, previousOwner);
 	const reloadedTabs = await reloadClaudeTabs();
 	lastSwitchAt = Date.now();
 	return { ok: true, email: result.email, reloadedTabs };
@@ -308,6 +355,7 @@ export const forgetAccount = serial(async (label) => {
 	if (!savedJar(jars, label)) return unknownLabel(label);
 	const { [label]: _forgotten, ...rest } = jars;
 	await writeJars(rest);
+	if ((await readConsoleOwner()) === label) await writeConsoleOwner(null);
 	return { ok: true };
 });
 
@@ -320,7 +368,7 @@ const isExpired = (state) => Date.now() - Date.parse(state.startedAt) > reloginM
 const endRelogin = async (state) => {
 	await chrome.alarms.clear(RELOGIN_EXPIRE_ALARM);
 	const restore = state.restoreLabel === null ? undefined : savedJar(await readJars(), state.restoreLabel);
-	if (Array.isArray(restore?.cookies)) await replaceAccountCookies(restore.cookies);
+	if (Array.isArray(restore?.cookies)) await replaceAccountCookies(restore.cookies, state.restoreLabel);
 	await reloadClaudeTabs();
 	await chrome.storage.local.remove(RELOGIN_KEY);
 	return { ...(await checkAllJars()), relogin: null };
@@ -374,7 +422,8 @@ export const startRelogin = serial(async () => {
 	const restoreLabel = live.status === "ok" ? labelForEmail(await readJars(), live.email) : null;
 	if (restoreLabel !== null) {
 		const cookies = (await accountCookies()).map(toSavedCookie);
-		await updateJar(restoreLabel, (jar) => withCookies(jar, cookies, live));
+		const owner = await readConsoleOwner();
+		await updateJar(restoreLabel, (jar) => capturedJar(jar, restoreLabel, cookies, owner, live));
 	}
 	const stale = staleEmails(await readJars());
 	if (!stale.length) return { ok: true, started: false, message: "No signed-out accounts" };
@@ -419,7 +468,9 @@ const captureRelogin = serial(async () => {
 	const jars = await readJars();
 	const label = labelForEmail(jars, email) ?? emailLabel(email);
 	const cookies = (await accountCookies()).map(toSavedCookie);
-	await writeJars({ ...jars, [label]: withCookies(savedJar(jars, label) ?? {}, cookies, live) });
+	const owner = await readConsoleOwner();
+	await writeJars({ ...jars, [label]: capturedJar(savedJar(jars, label) ?? {}, label, cookies, owner, live) });
+	await claimClearedConsole(owner, label, cookies);
 	const pending = state.pending.filter((pendingEmail) => pendingEmail !== email);
 	if (!pending.length) {
 		await endRelogin(state);
@@ -430,7 +481,7 @@ const captureRelogin = serial(async () => {
 });
 
 export const onCookieChanged = ({ removed, cookie }) => {
-	if (!removed && cookie.name === SESSION_COOKIE && cookie.domain.endsWith(COOKIE_DOMAIN)) {
+	if (!removed && cookie.name === SESSION_COOKIE && isSessionCookie(cookie)) {
 		return captureRelogin().catch(() => undefined);
 	}
 };
@@ -447,7 +498,7 @@ const isWebUrl = (url) => {
 export const isClaudeUrl = (url) => {
 	if (!isWebUrl(url)) return false;
 	const { protocol, hostname } = new URL(url);
-	return protocol === "https:" && (hostname === COOKIE_DOMAIN || hostname.endsWith(`.${COOKIE_DOMAIN}`));
+	return protocol === "https:" && (hostname === SESSION_DOMAIN || hostname.endsWith(`.${SESSION_DOMAIN}`));
 };
 
 export const activeLabel = async (jars) => {
@@ -583,7 +634,7 @@ export const exportLive = serial(async () => {
 	const live = await checkLive();
 	if (live.status === "revoked") return failure("session_expired", "Not signed in to claude.ai");
 	if (live.status !== "ok") return checkFailed();
-	return { ok: true, email: live.email, cookies: (await accountCookies()).map(toSavedCookie) };
+	return { ok: true, email: live.email, cookies: sessionCookiesOf(await accountCookies()).map(toSavedCookie) };
 });
 
 const MAX_IMPORT_COOKIES = 200;
@@ -592,7 +643,7 @@ const toImportedCookie = (c) =>
 	typeof c?.name === "string" &&
 	typeof c.value === "string" &&
 	typeof c.domain === "string" &&
-	(c.domain.replace(/^\./, "") === COOKIE_DOMAIN || c.domain.endsWith(`.${COOKIE_DOMAIN}`)) &&
+	isSessionCookie(c) &&
 	typeof c.path === "string"
 		? toSavedCookie(c)
 		: null;
@@ -617,6 +668,7 @@ export const importAccount = serial(async (label, cookies) => {
 	}
 	const target = existing ?? importLabel(typeof label === "string" ? label : "", result.email);
 	const current = await readJars();
-	await writeJars({ ...current, [target]: withCookies(savedJar(current, target) ?? {}, saved, result) });
+	const jar = savedJar(current, target) ?? {};
+	await writeJars({ ...current, [target]: withCookies(jar, capturedCookies(heldBySameAccount(jar, result), saved, false), result) });
 	return { ok: true, imported: true, label: target, email: result.email };
 });

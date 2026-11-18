@@ -40,6 +40,7 @@ Next, save your accounts: see [docs/ONBOARDING.md](docs/ONBOARDING.md). In short
 
 - **One account is active at a time.** The browser keeps cookies per profile, not per tab, so every claude.ai tab is on the same account. Two windows do not give you two accounts at once. A tab for account A and a tab for account B cannot both work at the same moment.
 - **Switching reloads your claude.ai tabs** into the new account, auto-swap included. Unsent text in those tabs can be lost, so finish your message first.
+- **The Anthropic Console switches too.** Each saved account also keeps its Console session (claude.com cookies, used by platform.claude.com), and a switch clears the outgoing account's Console and puts the incoming one's back, reloading Console tabs. An account with no Console session saved leaves the Console signed out, never signed in as another account. To save one, switch to the account, sign in to the Console once by hand, then run `ccp save` (or just switch away). Nothing can check which account a Console sign-in is for, so the Console you sign in to by hand is saved with the claude.ai account active at the time: sign in to the matching one. `ccp list --json` says per account whether one is held (`consoleJar`).
 - **Agents take turns.** If two scripts ask for different accounts at the same moment, the last switch wins.
 - **Claude in Chrome keeps its own login.** Claude Profiles changes the claude.ai website session only. It does not change which account the Claude in Chrome extension is signed in to.
 - **Never log out of a saved account.** Logging out revokes the session on Anthropic's side, and the saved copy stops working. To use another account, use "Sign in another account" in the popup or `ccp sign-in-another`, which clears the tabs locally without logging out.
@@ -50,7 +51,7 @@ Next, save your accounts: see [docs/ONBOARDING.md](docs/ONBOARDING.md). In short
 
 Everything stays on your machine. Saved sessions live in the extension's local storage in your browser profile, and auto-swap remembers only which of your own account labels owns which claude.ai link. The extension talks to `ccp` over a Unix socket in `~/.config/chromium-claude-profiles/run/` (directory mode 0700, socket 0600), so only your own user can use it. The optional HTTP API listens on `127.0.0.1` only and needs a bearer token. No debugging port is opened, cookie values are never logged or printed, and nothing is sent to any server other than claude.ai itself, to check each session. No analytics, no telemetry. See [SECURITY.md](SECURITY.md).
 
-The extension requests host access to `claude.ai` only, plus the `cookies`, `nativeMessaging`, `storage`, `offscreen`, `alarms`, `scripting` and `declarativeNetRequestWithHostAccess` permissions. It does not ask for `tabs` or access to any other site. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) says what each is for.
+The extension requests host access to `claude.ai` and `claude.com` only, plus the `cookies`, `nativeMessaging`, `storage`, `offscreen`, `alarms`, `scripting` and `declarativeNetRequestWithHostAccess` permissions. It does not ask for `tabs` or access to any other site. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) says what each is for.
 
 ## Uninstall
 
@@ -74,7 +75,7 @@ The extension requests host access to `claude.ai` only, plus the `cookies`, `nat
 
 ```
 ccp doctor [--json]                     check Node, the native host and the extension; say what to do next
-ccp list [--json]                       saved accounts, which is active, last known status
+ccp list [--json]                       saved accounts, which is active, last known status; --json also gives consoleJar, whether a Console session is held
 ccp status [<account>] [--json]         check every saved session now
 ccp save [<label>]                      save the account signed in now under its email (or a label)
 ccp sign-in-another                     save the current account, then open the sign-in page (does not log out)

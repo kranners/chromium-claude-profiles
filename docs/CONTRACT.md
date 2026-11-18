@@ -422,7 +422,7 @@ A saved claude.ai account whose session was revoked can only be restored by sign
   "description": "Keep every Claude account in one Chromium and let agents switch and open claude.ai sessions.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApsOB8/9r26rcuLGR+VHgUV6ZnwJueFmlMycFrCJkxny7BwsnxFty2Niy/hvaPzESDb/o+8KjsbxOlQlblje8HZnm6eTm60PDGqJ0xHjRjNF5L/M8OG5dh7rWz/MAp3BUpq5Nfa6YL4ukOxieWPOeVksWRHUiNa8P7eMQAC0sGyIBEq2GMVM4GCL2bpCOUoUN6NsCV10Ax8wvM7KFJX2NNuXBqUx2Fd0EqyyTrTFbRjsB4RRJcWayumYTuWxqfaNNqVi0s8YC/nPZphux2mIOUU22exiPrye/m/vzNGgA4RwId2/Qr1n7vzkVIKNzscn5jS+V9WHBmjtZCKUefwmb/QIDAQAB",
   "permissions": ["nativeMessaging", "cookies", "storage", "offscreen", "declarativeNetRequestWithHostAccess", "alarms", "scripting"],
-  "host_permissions": ["https://claude.ai/*", "https://*.claude.ai/*"],
+  "host_permissions": ["https://claude.ai/*", "https://*.claude.ai/*", "https://claude.com/*", "https://*.claude.com/*"],
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Claude Profiles" },
   "externally_connectable": {
@@ -443,7 +443,7 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 | `profiles.list` | native host | yes | yes |
 | `accounts.open` `{label, url?}` | jars → switch if not active, open `url` (or focus a claude.ai tab) → `{ok:true, label, email, switched, reloadedTabs, tabId}` (external: no `email`) | yes | yes |
 | `bridge.status` | `{ok:true, connected}` | yes | no |
-| `accounts.list` | `lib/jars.js` → `{ok:true, accounts:[{label, savedAt, cookieCount, email, status, checkedAt}]}` (external: no `email`) | yes | yes |
+| `accounts.list` | `lib/jars.js` → `{ok:true, accounts:[{label, savedAt, cookieCount, email, status, checkedAt, sessionExpiresAt, consoleJar}]}` (external: no `email`) | yes | yes |
 | `accounts.check` | jars → probes every jar, same body as `accounts.list` | yes | no |
 | `accounts.relogin` | jars → native `relogin.start` → `{ok:true, started, order?, skipped?, driver?, message?}` | yes | no |
 | `accounts.reloginCancel` | jars → same body as `accounts.list`, with `relogin: null` | yes | no |
@@ -472,26 +472,28 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
   - `domain` is omitted when `hostOnly`;
   - `expirationDate` is omitted for session cookies;
   - `name`, `value`, `path`, `secure`, `httpOnly` and `sameSite` are carried over.
-- `toAccountSummary(label, jar)`: `{label, savedAt, cookieCount, email, status, checkedAt}`, with `null` for a missing email or check.
+- `toAccountSummary(label, jar)`: `{label, savedAt, cookieCount, email, status, checkedAt, sessionExpiresAt, consoleJar}`, with `null` for a missing email or check; `consoleJar` is whether the jar holds any claude.com cookie.
 - `classifyAccountResponse({status, cfMitigated, email})`: the session check rule below.
 - `cookieHeader(cookies)`: `name=value; name=value`.
 - `probeRule(id, extensionId, header)`: the declarativeNetRequest session rule below.
 
 **Operations**
 
-- **save:** `chrome.cookies.getAll({domain: "claude.ai"})`, filter out infra cookies, store. If no `sessionKey` cookie is present, fail with `invalid_request` and the message "Not signed in to claude.ai".
+- **Domains:** `COOKIE_DOMAINS` is `["claude.ai", "claude.com"]`; claude.ai holds the session every check reads, claude.com the Anthropic Console's. A jar's `cookies` hold both; a jar saved before claude.com was added holds claude.ai alone and still works.
+- **Console owner:** `chrome.storage.local` key `consoleOwner` names the label whose jar a switch last put in the store, or `*cleared*` after the extension cleared it, or null when unknown (before the first switch). Live claude.com cookies are captured into a jar only when `consoleOwner` is that jar's label, or `*cleared*` with claude.com cookies present (a Console signed in since the clear, which then claims it); otherwise the jar keeps the claude.com cookies it already held. So a Console of unknown owner is never saved under another account. A jar keeps its claude.com cookies through a capture or import only while its email matches the incoming session's. Forgetting the owner's jar resets `consoleOwner` to null. The Console's own account is never checked, so a Console signed in by hand is taken to be the active claude.ai account's.
+- **save:** `chrome.cookies.getAll({domain})` for each domain, filter out infra cookies, store as above. If no `sessionKey` cookie is present, fail with `invalid_request` and the message "Not signed in to claude.ai".
 - **switch:**
-  1. Remove every non-infra cookie returned by `getAll({domain: "claude.ai"})`.
-  2. Set each saved cookie.
-  3. Reload every tab from `chrome.tabs.query({url: ["https://claude.ai/*", "https://*.claude.ai/*"]})`; host permissions are enough for this.
+  1. Remove every non-infra cookie returned by `getAll({domain})` for each domain, the outgoing Console included.
+  2. Set each saved cookie, and set `consoleOwner` to the label. A jar with no claude.com cookies leaves the Console signed out.
+  3. Reload every tab from `chrome.tabs.query({url: ["https://claude.ai/*", "https://*.claude.ai/*", "https://claude.com/*", "https://*.claude.com/*"]})`; host permissions are enough for this.
   4. Return the count of reloaded tabs.
-  - Before step 1 the outgoing session is checked live; after step 2 the new one is. If the new one is not ok, the previous cookies go back: a revoked session returns `session_expired` (and records the jar as revoked), anything else returns `internal`.
+  - Before step 1 the outgoing session is checked live; after step 2 the new one is. If the new one is not ok, the previous cookies and `consoleOwner` go back: a revoked session returns `session_expired` (and records the jar as revoked), anything else returns `internal`.
 - **Default store only:** incognito is out of scope.
 
 **Session checks**
 
 - A jar may carry `email` (recorded on save and on every ok check) and `check: {status: "ok" | "revoked" | "unknown", checkedAt}`.
-- A jar is checked without touching the cookie store: a declarativeNetRequest session rule sets the `cookie` header (the jar's cookies plus the live Cloudflare cookies) on `https://claude.ai/api/account?ccp_probe=<id>` for requests initiated by this extension, the worker fetches it with `credentials: "omit"`, and the rule is removed in `finally`.
+- A jar is checked without touching the cookie store: a declarativeNetRequest session rule sets the `cookie` header (the jar's claude.ai cookies plus the live Cloudflare cookies) on `https://claude.ai/api/account?ccp_probe=<id>` for requests initiated by this extension, the worker fetches it with `credentials: "omit"`, and the rule is removed in `finally`.
 - Classification: 200 with `email_address` → `ok`; 401, or 403 without a `cf-mitigated` header → `revoked`; anything else → `unknown`.
 - The popup checks on open; an alarm checks hourly. The action badge shows the number of revoked jars in red.
 - Switching away from an ok session first writes its current cookies back into the jar with the same email, so refreshed session keys are not lost.
@@ -507,11 +509,11 @@ The extension uses plain ES modules with no build step and no icons; Chromium's 
 **One browser, every account (v0.3)**
 
 - `sessionExpiresAt(cookies)`: the saved `sessionKey`'s `expirationDate` as ISO, or null. `toAccountSummary` includes it; a jar past it counts as signed out for the badge.
-- Every `writeJars` sends `accounts.report` with `toReport` summaries (label, email, status, checkedAt, sessionExpiresAt) over the bridge port when connected.
+- Every `writeJars` sends `accounts.report` with `toReport` summaries (label, email, status, checkedAt, sessionExpiresAt, consoleJar) over the bridge port when connected.
 - Bridge handlers (`service-worker.js` `handleBridge`): `ping`; `accounts.list` and `accounts.check` → summaries plus `active` (the label whose email matches the live session); `accounts.open`; `accounts.openFor`; `accounts.import`; `accounts.exportLive`. Each runs in the jars' serial queue.
 - `accounts.openFor {url}`: `url` must be https on claude.ai. Order: the active account, then every other jar not known revoked, by label. For each it switches (except for the active one, first), loads `url` in one tab of its own, and reads the page text with `chrome.scripting.executeScript` until `classifyPage` decides: `signed-out` on `/login` or `/magic-link`, `not-found` on "couldn't be found" and similar, `found` once 8 s have passed since load with neither (at most 25 s). On `found` it focuses the tab and returns; if none, it closes its tab, switches back to the starting account and returns `not_found` naming each result.
-- `accounts.exportLive`: the live claude.ai account cookies (no Cloudflare cookies) and email, only while the live check is ok; `session_expired` when revoked.
-- `accounts.import {label, cookies}`: at most 200 cookies on claude.ai, Cloudflare ones dropped, a `sessionKey` required. The jar is probed (§5.3 session checks) without touching the live cookies; revoked → `session_expired`. If a jar for that email already passes a probe it is kept (`imported:false`); otherwise the session is saved into that jar, or a new one labelled with the given label (or the email made label-safe).
+- `accounts.exportLive`: the live claude.ai account cookies (no Cloudflare or claude.com cookies) and email, only while the live check is ok; `session_expired` when revoked.
+- `accounts.import {label, cookies}`: at most 200 cookies on claude.ai, Cloudflare ones dropped, a `sessionKey` required. The jar is probed (§5.3 session checks) without touching the live cookies; revoked → `session_expired`. If a jar for that email already passes a probe it is kept (`imported:false`); otherwise the session is saved into that jar, keeping its claude.com cookies, or a new one labelled with the given label (or the email made label-safe).
 
 ### 5.4 Popup
 

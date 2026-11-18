@@ -16,6 +16,7 @@ export type AccountSummary = {
 	status: AccountStatus;
 	checkedAt: string | null;
 	sessionExpiresAt: string | null;
+	consoleJar: boolean;
 };
 export type AccountView = AccountSummary & { name: string; state: AccountState; active: boolean };
 
@@ -42,6 +43,7 @@ export const toSummary = (value: unknown): AccountSummary | null => {
 		status: typeof entry.status === "string" && STATUSES.has(entry.status) ? (entry.status as AccountStatus) : null,
 		checkedAt: isIsoDate(entry.checkedAt) ? entry.checkedAt : null,
 		sessionExpiresAt: isIsoDate(entry.sessionExpiresAt) ? entry.sessionExpiresAt : null,
+		consoleJar: entry.consoleJar === true,
 	};
 };
 

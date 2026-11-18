@@ -106,8 +106,9 @@ test("sessionExpiresAt reads the session cookie's expiry, and expired sessions c
 	assert.equal(isSignedOut({ ...base, sessionExpiresAt: "2020-01-01T00:00:00.000Z" }), true);
 	assert.equal(isSignedOut({ ...base, sessionExpiresAt: null }), false);
 	assert.equal(isSignedOut({ ...base, status: "revoked", sessionExpiresAt: null }), true);
-	assert.deepEqual(Object.keys(toReport({ ...base, sessionExpiresAt: null, savedAt: "x", cookieCount: 3 })).sort(), [
+	assert.deepEqual(Object.keys(toReport({ ...base, sessionExpiresAt: null, consoleJar: true, savedAt: "x", cookieCount: 3 })).sort(), [
 		"checkedAt",
+		"consoleJar",
 		"email",
 		"label",
 		"sessionExpiresAt",

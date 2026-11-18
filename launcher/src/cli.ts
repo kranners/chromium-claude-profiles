@@ -29,6 +29,9 @@ const USAGE = `usage:
   ccp serve [--port N]
   ccp install-host [--browser chromium|chrome|brave] [--chromium-default]
   ccp native-host <origin>
+
+ccp list --json gives each account's consoleJar: whether its Anthropic Console
+(claude.com) session is saved, which ccp switch swaps along with claude.ai.
 `;
 
 class UsageError extends Error {}

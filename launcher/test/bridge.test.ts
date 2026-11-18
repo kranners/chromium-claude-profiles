@@ -36,6 +36,7 @@ const summary = (label: string, extra: Partial<AccountSummary> = {}): AccountSum
 	status: "ok",
 	checkedAt: "2026-11-04T00:00:00.000Z",
 	sessionExpiresAt: "2027-01-01T00:00:00.000Z",
+	consoleJar: false,
 	...extra,
 });
 
@@ -129,7 +130,7 @@ test("the status file keeps only the summary fields, mode 0600", () => {
 	assert.equal(statSync(accountsStatusFile(ctx.home)).mode & 0o777, 0o600);
 	const body = JSON.parse(text);
 	assert.equal(body.schemaVersion, 1);
-	assert.deepEqual(Object.keys(body.accounts[0]).sort(), ["checkedAt", "email", "label", "name", "sessionExpiresAt", "state", "status"]);
+	assert.deepEqual(Object.keys(body.accounts[0]).sort(), ["checkedAt", "consoleJar", "email", "label", "name", "sessionExpiresAt", "state", "status"]);
 	assert.equal(writeAccountsStatus(ctx.home, [{ label: "../x" }]).ok, false);
 });
 

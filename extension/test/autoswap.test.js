@@ -214,7 +214,7 @@ test("the confirmation banner can only turn auto-swap on or off, and the popup a
 
 test("the manifest still asks only for what auto-swap needs", async () => {
 	const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
-	assert.deepEqual(manifest.host_permissions, ["https://claude.ai/*", "https://*.claude.ai/*"]);
+	assert.deepEqual(manifest.host_permissions, ["https://claude.ai/*", "https://*.claude.ai/*", "https://claude.com/*", "https://*.claude.com/*"]);
 	assert.equal(manifest.permissions.includes("tabs"), false);
 });
 
